@@ -1,0 +1,13 @@
+level_selection:
+  alpha: 1.2
+  beta: 1.6
+
+resource_selection:
+  remaining_capacity_floor: 0.05
+
+recovery:
+  enabled: true
+  gamma: 1.3
+
+runtime:
+  inference_periods: 100

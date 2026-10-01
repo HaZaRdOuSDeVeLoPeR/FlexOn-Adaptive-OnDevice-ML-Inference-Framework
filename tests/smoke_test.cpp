@@ -1,0 +1,14 @@
+#include <flexon/core/types.hpp>
+
+#include <cassert>
+
+int main() {
+    flexon::core::SegmentInfo segment;
+    segment.level = 0;
+    segment.id = 0;
+
+    assert(segment.level == 0);
+    assert(segment.id == 0);
+
+    return 0;
+}

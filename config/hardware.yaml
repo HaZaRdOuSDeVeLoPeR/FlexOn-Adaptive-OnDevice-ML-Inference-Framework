@@ -1,0 +1,11 @@
+resources:
+  cpu:
+    enabled: true
+    execution_provider: CPUExecutionProvider
+
+  cuda:
+    enabled: true
+    execution_provider: CUDAExecutionProvider
+    device_id: 0
+    use_tf32: false
+    cudnn_conv_algo_search: HEURISTIC

@@ -1,0 +1,15 @@
+build/
+third_party/
+apps/
+models/
+artifacts/
+results/
+logs/
+dashboard/node_modules/
+*.onnx
+*.onnx.data
+*.ort
+*.prof
+compile_commands.json
+.cache/
+__pycache__/
