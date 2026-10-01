@@ -287,25 +287,26 @@ target_link_libraries(
 # Online library
 # ============================================================================
 
-# src/online/ is currently empty.
-# Convert this to STATIC once online implementation sources are added.
-
+# Online library
 add_library(
     flexon_online_lib
-    INTERFACE
+    STATIC
+
+    src/online/runtime_engine.cpp
 )
 
 target_include_directories(
     flexon_online_lib
-    INTERFACE
+    PUBLIC
         "${FLEXON_INCLUDE_DIR}"
 )
 
 target_link_libraries(
     flexon_online_lib
-    INTERFACE
+    PUBLIC
         flexon_core
         flexon_onnxruntime
+        yaml-cpp
 )
 
 # ============================================================================
