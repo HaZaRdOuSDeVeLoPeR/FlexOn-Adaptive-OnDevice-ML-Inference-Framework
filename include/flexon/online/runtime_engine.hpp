@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 #include <memory>
+#include <vector>
 
 namespace flexon::online {
 
@@ -19,16 +20,19 @@ struct RunOptions {
     std::uint32_t iterations{1};
     std::uint32_t level{0};
     RuntimeResource resource{RuntimeResource::CPU};
+    // Optional per-segment execution plan. When non-empty, its size must
+    // match the selected level segment count.
+    std::vector<RuntimeResource> resource_plan;
 };
 
 /**
  * Online runtime for executing a frozen offline artifact.
  *
- * Milestone 1 focuses on correctness of segmented execution.
- * All supported segment/resource session variants are prepared by load(),
- * while run() only executes already-created sessions and propagates tensors
- * between segment boundaries. I/O binding is used for explicit input/output
- * placement, while adaptive scheduling is introduced in later milestones.
+ * Milestone 1/2 runtime for executing a frozen offline artifact.
+ * All supported segment/resource session variants are prepared by load().
+ * Segment execution uses I/O binding and explicit CPU/CUDA tensor placement;
+ * cross-resource boundary copies are measured separately from compute time.
+ * Adaptive scheduling is introduced in later milestones.
  */
 class FlexOnRuntime {
 public:

@@ -1,4 +1,5 @@
 build/
+build-asan/
 third_party/
 apps/
 models/

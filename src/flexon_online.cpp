@@ -11,7 +11,28 @@ void print_usage(const char* program) {
     std::cout
         << "Usage: " << program
         << " --artifact <dir> [--level N] [--resource cpu|cuda|auto]"
-           " [--iterations N]\n";
+           " [--iterations N] [--resource-plan cpu,cuda,...]\n";
+}
+
+std::vector<flexon::online::RuntimeResource> parse_resource_plan(
+    const std::string& value) {
+    std::vector<flexon::online::RuntimeResource> plan;
+    std::size_t start = 0;
+    while (start < value.size()) {
+        const auto comma = value.find(',', start);
+        const auto token = value.substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start);
+        if (token.empty()) {
+            throw std::invalid_argument("Empty resource-plan entry");
+        }
+        if (token == "cpu") plan.push_back(flexon::online::RuntimeResource::CPU);
+        else if (token == "cuda") plan.push_back(flexon::online::RuntimeResource::CUDA);
+        else if (token == "auto") plan.push_back(flexon::online::RuntimeResource::Auto);
+        else throw std::invalid_argument("Unknown resource in plan: " + token);
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return plan;
 }
 
 flexon::online::RuntimeResource parse_resource(const std::string& value) {
@@ -38,6 +59,8 @@ int main(int argc, char** argv) {
                 options.resource = parse_resource(argv[++i]);
             } else if (arg == "--iterations" && i + 1 < argc) {
                 options.iterations = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+            } else if (arg == "--resource-plan" && i + 1 < argc) {
+                options.resource_plan = parse_resource_plan(argv[++i]);
             } else if (arg == "--help" || arg == "-h") {
                 print_usage(argv[0]);
                 return 0;

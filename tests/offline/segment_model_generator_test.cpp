@@ -53,15 +53,15 @@ int main() {
         flexon::core::OperatorProfile profile;
         profile.op = op;
         profile.costs.push_back({
-            flexon::core::Resource::CPU, 1.0, 1.0});
+            flexon::core::Resource::CPU, 1.0, 1.0, {}, {}});
         profile.costs.push_back({
-            flexon::core::Resource::CUDA, 1.0, 1.0});
+            flexon::core::Resource::CUDA, 1.0, 1.0, {}, {}});
         profiles.emplace(op.graph_index, std::move(profile));
     }
 
     const auto segments =
         flexon::offline::segmentation::InitialSegmenter::create(
-            model, info, config, profiles);
+            info, config, profiles);
 
     assert(segments.size() == 1);
     assert(segments[0].operator_indices.size() == 2);
@@ -92,7 +92,7 @@ int main() {
 
         const auto fallback_segments =
             flexon::offline::segmentation::InitialSegmenter::create(
-                model, info, config, fallback_profiles);
+                info, config, fallback_profiles);
 
         assert(fallback_segments.size() == 2);
         assert(fallback_segments[0].operator_indices.size() == 1);
@@ -114,7 +114,7 @@ int main() {
 
         const auto explicit_segments =
             flexon::offline::segmentation::InitialSegmenter::create(
-                model, info, config, explicit_profiles);
+                info, config, explicit_profiles);
 
         assert(explicit_segments.size() == 2);
         assert(explicit_segments[0].operator_indices.size() == 1);

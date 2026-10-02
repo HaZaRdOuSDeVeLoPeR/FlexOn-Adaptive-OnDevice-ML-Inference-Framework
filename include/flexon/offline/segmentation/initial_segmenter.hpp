@@ -16,7 +16,6 @@ public:
     // resource-capability boundaries; operators supported by both resources
     // remain in the surrounding segment.
     static std::vector<core::SegmentInfo> create(
-        const onnx::ModelProto& model,
         const core::GraphInfo& graph,
         const config::OfflineConfig& config,
         const core::OperatorProfileMap& operator_profiles);

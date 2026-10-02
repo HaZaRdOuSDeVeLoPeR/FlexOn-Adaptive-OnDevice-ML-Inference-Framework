@@ -1,9 +1,11 @@
 #include <flexon/online/runtime_engine.hpp>
 
 #include <onnxruntime_cxx_api.h>
+#include <cuda_runtime_api.h>
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -150,11 +152,6 @@ ArtifactManifest load_manifest(const std::filesystem::path& directory) {
     return artifact;
 }
 
-Ort::Env& ort_env() {
-    static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "FlexOnOnline");
-    return env;
-}
-
 std::vector<std::int64_t> concrete_shape(std::vector<std::int64_t> shape) {
     for (auto& dim : shape) {
         if (dim < 0) {
@@ -253,12 +250,18 @@ struct SegmentRuntime {
 
 struct RuntimeState {
     ArtifactManifest artifact;
-    Ort::Env* env{nullptr};
+
+    Ort::Env env{
+        ORT_LOGGING_LEVEL_WARNING,
+        "FlexOnOnline"
+    };
+
     Ort::AllocatorWithDefaultOptions allocator;
     std::vector<std::vector<SegmentRuntime>> levels;
 };
 
 std::unique_ptr<Ort::Session> create_session(
+    Ort::Env& env,
     const std::filesystem::path& model_path,
     RuntimeResource resource) {
 
@@ -275,7 +278,7 @@ std::unique_ptr<Ort::Session> create_session(
 
     try {
         return std::make_unique<Ort::Session>(
-            ort_env(), model_path.c_str(), options);
+            env, model_path.c_str(), options);
     } catch (const Ort::Exception& ex) {
         throw std::runtime_error(
             std::string("Failed to create ") + resource_name(resource) +
@@ -340,6 +343,198 @@ void add_initial_inputs(
     (void)input_names;
 }
 
+RuntimeResource tensor_resource(const Ort::Value& value) {
+    const auto memory_info = value.GetTensorMemoryInfo();
+    auto name = memory_info.GetAllocatorName();
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (name.find("cuda") != std::string::npos) {
+        return RuntimeResource::CUDA;
+    }
+    if (name.find("cpu") != std::string::npos) {
+        return RuntimeResource::CPU;
+    }
+
+    throw std::runtime_error(
+        "Unsupported tensor memory allocator: " + name);
+}
+
+Ort::MemoryInfo memory_info_for_resource(RuntimeResource resource) {
+    if (resource == RuntimeResource::CPU) {
+        return Ort::MemoryInfo::CreateCpu(
+            OrtAllocatorType::OrtArenaAllocator,
+            OrtMemTypeDefault);
+    }
+
+    if (resource == RuntimeResource::CUDA) {
+        return Ort::MemoryInfo(
+            "Cuda",
+            OrtAllocatorType::OrtDeviceAllocator,
+            0,
+            OrtMemTypeDefault);
+    }
+
+    throw std::invalid_argument(
+        "A concrete CPU/CUDA resource is required for tensor placement");
+}
+
+void check_cuda(cudaError_t status, const char* operation);
+
+struct OwnedCudaBuffer {
+    void* data = nullptr;
+    std::size_t bytes = 0;
+
+    OwnedCudaBuffer() = default;
+
+    explicit OwnedCudaBuffer(std::size_t size) : bytes(size) {
+        if (bytes != 0) {
+            check_cuda(cudaMalloc(&data, bytes), "cudaMalloc");
+        }
+    }
+
+    ~OwnedCudaBuffer() {
+        if (data != nullptr) {
+            cudaFree(data);
+        }
+    }
+
+    OwnedCudaBuffer(const OwnedCudaBuffer&) = delete;
+    OwnedCudaBuffer& operator=(const OwnedCudaBuffer&) = delete;
+
+    OwnedCudaBuffer(OwnedCudaBuffer&& other) noexcept
+        : data(other.data), bytes(other.bytes) {
+        other.data = nullptr;
+        other.bytes = 0;
+    }
+
+    OwnedCudaBuffer& operator=(OwnedCudaBuffer&& other) noexcept {
+        if (this != &other) {
+            if (data != nullptr) cudaFree(data);
+            data = other.data;
+            bytes = other.bytes;
+            other.data = nullptr;
+            other.bytes = 0;
+        }
+        return *this;
+    }
+};
+
+// Ort::Value must be destroyed before the external CUDA allocation.
+// Members are destroyed in reverse declaration order.
+struct TransferredTensor {
+    OwnedCudaBuffer buffer;
+    Ort::Value value{nullptr};
+};
+
+std::size_t element_size(ONNXTensorElementDataType type) {
+    switch (type) {
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT: return sizeof(float);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8: return sizeof(std::uint8_t);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8: return sizeof(std::int8_t);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16: return sizeof(std::uint16_t);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16: return sizeof(std::int16_t);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32: return sizeof(std::int32_t);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: return sizeof(std::int64_t);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING: break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL: return sizeof(bool);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16: return 2;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE: return sizeof(double);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32: return sizeof(std::uint32_t);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64: return sizeof(std::uint64_t);
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX64: return 8;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX128: return 16;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16: return 2;
+        default: break;
+    }
+    throw std::runtime_error(
+        "Unsupported tensor element type for explicit CPU/CUDA transfer: " +
+        std::to_string(static_cast<int>(type)));
+}
+
+std::size_t tensor_byte_count(const Ort::Value& value) {
+    const auto info = value.GetTensorTypeAndShapeInfo();
+    const auto count = info.GetElementCount();
+    const auto size = element_size(info.GetElementType());
+    if (count != 0 && size > std::numeric_limits<std::size_t>::max() / count) {
+        throw std::runtime_error("Tensor byte size overflows size_t");
+    }
+    return count * size;
+}
+
+void check_cuda(cudaError_t status, const char* operation) {
+    if (status != cudaSuccess) {
+        throw std::runtime_error(
+            std::string(operation) + " failed: " + cudaGetErrorString(status));
+    }
+}
+
+double transfer_tensor(
+    const Ort::Value& source,
+    RuntimeResource destination_resource,
+    Ort::AllocatorWithDefaultOptions& cpu_allocator,
+    TransferredTensor& destination) {
+
+    const auto start = std::chrono::steady_clock::now();
+
+    const auto source_resource = tensor_resource(source);
+
+    if (source_resource == destination_resource) {
+        throw std::invalid_argument(
+            "transfer_tensor called without a resource change");
+    }
+
+    const auto type_info = source.GetTensorTypeAndShapeInfo();
+    const auto shape = concrete_shape(type_info.GetShape());
+    const auto type = type_info.GetElementType();
+    const auto bytes = tensor_byte_count(source);
+
+    if (destination_resource == RuntimeResource::CUDA) {
+        destination.buffer = OwnedCudaBuffer(bytes);
+
+        const auto memory_info =
+            memory_info_for_resource(RuntimeResource::CUDA);
+
+        destination.value = Ort::Value::CreateTensor(
+            memory_info,
+            destination.buffer.data,
+            bytes,
+            shape.data(),
+            shape.size(),
+            type);
+
+        check_cuda(
+            cudaMemcpy(
+                destination.buffer.data,
+                source.GetTensorRawData(),
+                bytes,
+                cudaMemcpyHostToDevice),
+            "cudaMemcpyHostToDevice");
+    } else if (destination_resource == RuntimeResource::CPU) {
+        destination.value = Ort::Value::CreateTensor(
+            cpu_allocator,
+            shape.data(),
+            shape.size(),
+            type);
+
+        check_cuda(
+            cudaMemcpy(
+                destination.value.GetTensorMutableRawData(),
+                source.GetTensorRawData(),
+                bytes,
+                cudaMemcpyDeviceToHost),
+            "cudaMemcpyDeviceToHost");
+    } else {
+        throw std::invalid_argument(
+            "A concrete CPU/CUDA destination resource is required");
+    }
+
+    const auto end = std::chrono::steady_clock::now();
+
+    return std::chrono::duration<double, std::milli>(
+        end - start).count();
+}
+
 void execute_segment(
     SegmentRuntime& segment,
     RuntimeResource requested_resource,
@@ -348,6 +543,7 @@ void execute_segment(
 
     const auto resource = choose_resource(segment, requested_resource);
     auto* prepared = find_session(segment, resource);
+    
     if (!prepared || !prepared->session) {
         throw std::runtime_error(
             "Prepared session missing for " + std::string(resource_name(resource)) +
@@ -360,84 +556,100 @@ void execute_segment(
 
     std::vector<std::string> input_name_storage;
     input_name_storage.reserve(input_count);
+    double boundary_copy_ms = 0.0;
 
+    // The transferred tensors must outlive IoBinding because bindings may
+    // retain references to the externally-backed Ort::Value objects.
+    std::vector<TransferredTensor> transferred_inputs;
+    transferred_inputs.reserve(input_count);
     Ort::IoBinding io_binding(session);
 
     for (std::size_t i = 0; i < input_count; ++i) {
         auto name = session.GetInputNameAllocated(i, allocator);
         input_name_storage.emplace_back(name.get());
+        const auto& input_name = input_name_storage.back();
+        const auto it = tensor_store.find(input_name);
 
-        const auto it = tensor_store.find(input_name_storage.back());
         if (it == tensor_store.end()) {
             throw std::runtime_error(
                 "Missing tensor required by segment " +
                 std::to_string(segment.manifest.id) + ": " +
-                input_name_storage.back());
+                input_name);
         }
 
-        // Bind the existing OrtValue without copying or transferring ownership.
-        // ORT performs any required device transfer when the selected EP needs it.
-        io_binding.BindInput(input_name_storage.back().c_str(), it->second);
+        const auto source_resource = tensor_resource(it->second);
+
+        if (source_resource == resource) {
+            io_binding.BindInput(
+                input_name.c_str(),
+                it->second);
+
+        } else {
+            transferred_inputs.emplace_back();
+            boundary_copy_ms += transfer_tensor(
+                it->second,
+                resource,
+                allocator,
+                transferred_inputs.back());
+
+            io_binding.BindInput(
+                input_name.c_str(),
+                transferred_inputs.back().value);
+
+        }
     }
 
     std::vector<std::string> output_name_storage;
     output_name_storage.reserve(output_count);
+
     for (std::size_t i = 0; i < output_count; ++i) {
         auto name = session.GetOutputNameAllocated(i, allocator);
         output_name_storage.emplace_back(name.get());
     }
 
-    // Let ORT allocate outputs in the selected execution resource. This is
-    // the first step toward keeping segment boundaries device-resident and
-    // avoiding the implicit CPU output copy of ordinary Session::Run().
-    if (resource == RuntimeResource::CUDA) {
-        const Ort::MemoryInfo cuda_memory(
-            "Cuda",
-            OrtDeviceAllocator,
-            0,
-            OrtMemTypeDefault);
-        for (const auto& name : output_name_storage) {
-            io_binding.BindOutput(name.c_str(), cuda_memory);
-        }
-    } else {
-        const auto cpu_memory =
-            Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault);
-        for (const auto& name : output_name_storage) {
-            io_binding.BindOutput(name.c_str(), cpu_memory);
-        }
+    const auto memory_info = memory_info_for_resource(resource);
+
+    for (const auto& name : output_name_storage) {
+        io_binding.BindOutput(
+            name.c_str(),
+            memory_info);
     }
 
     const auto start = std::chrono::steady_clock::now();
-    session.Run(Ort::RunOptions{nullptr}, io_binding);
-    io_binding.SynchronizeOutputs();
-    const auto end = std::chrono::steady_clock::now();
 
+    session.Run(
+        Ort::RunOptions{nullptr},
+        io_binding);
+
+    io_binding.SynchronizeOutputs();
+
+    const auto end = std::chrono::steady_clock::now();
     const double elapsed_ms =
         std::chrono::duration<double, std::milli>(end - start).count();
 
-    auto outputs = io_binding.GetOutputValues(allocator);
+    auto outputs = io_binding.GetOutputValues();
+
     if (outputs.size() != output_name_storage.size()) {
         throw std::runtime_error(
             "Segment " + std::to_string(segment.manifest.id) +
             " returned an unexpected number of outputs");
     }
 
-    // GetOutputValues() materializes Ort::Value handles from the bound
-    // outputs. Detach the bound-output references before the returned
-    // Ort::Values are destroyed; otherwise the IoBinding and tensor_store
-    // can end up releasing the same OrtValue twice.
-    io_binding.ClearBoundOutputs();
-
     for (std::size_t i = 0; i < outputs.size(); ++i) {
+
         tensor_store.insert_or_assign(
             output_name_storage[i],
             std::move(outputs[i]));
+
     }
 
     std::cout << "    segment " << segment.manifest.id
-              << " [" << resource_name(resource) << "] "
-              << elapsed_ms << " ms\n";
+            << " [" << resource_name(resource) << "] "
+            << elapsed_ms << " ms"
+            << " | boundary_copy=" << boundary_copy_ms << " ms\n";
+
 }
+
 }  // namespace
 
 struct FlexOnRuntimeImpl {
@@ -455,7 +667,6 @@ void FlexOnRuntime::load(const std::filesystem::path& artifact_directory) {
     auto artifact = load_manifest(artifact_directory);
 
     auto state = std::make_unique<RuntimeState>();
-    state->env = &ort_env();
     state->artifact = std::move(artifact);
     state->levels.resize(state->artifact.levels.size());
 
@@ -475,15 +686,19 @@ void FlexOnRuntime::load(const std::filesystem::path& artifact_directory) {
                 runtime_segment.sessions.push_back(
                     PreparedSession{
                         RuntimeResource::CPU,
-                        create_session(manifest_segment.model_path,
-                                       RuntimeResource::CPU)});
+                        create_session(
+                            state->env,
+                            manifest_segment.model_path,
+                            RuntimeResource::CPU)});
             }
             if (manifest_segment.cuda_supported) {
                 runtime_segment.sessions.push_back(
                     PreparedSession{
                         RuntimeResource::CUDA,
-                        create_session(manifest_segment.model_path,
-                                       RuntimeResource::CUDA)});
+                        create_session(
+                            state->env,
+                            manifest_segment.model_path,
+                            RuntimeResource::CUDA)});
             }
 
             runtime_level.push_back(std::move(runtime_segment));
@@ -518,6 +733,12 @@ void FlexOnRuntime::run(const RunOptions& options) {
         throw std::runtime_error("Requested level contains no segments");
     }
 
+    if (!options.resource_plan.empty() &&
+        options.resource_plan.size() != level.size()) {
+        throw std::invalid_argument(
+            "resource plan length must match the selected level segment count");
+    }
+
     // The first segment/session defines the model's external input tensors.
     // These are regenerated for each inference iteration; all intermediate
     // tensors are retained in the tensor store until consumed by later
@@ -541,10 +762,17 @@ void FlexOnRuntime::run(const RunOptions& options) {
                   << "/" << options.iterations
                   << " level=" << options.level << '\n';
 
-        for (auto& segment : level) {
+        for (std::size_t segment_index = 0;
+             segment_index < level.size();
+             ++segment_index) {
+            auto& segment = level[segment_index];
+            const auto requested_resource =
+                options.resource_plan.empty()
+                    ? options.resource
+                    : options.resource_plan[segment_index];
             execute_segment(
                 segment,
-                options.resource,
+                requested_resource,
                 tensor_store,
                 impl_->state->allocator);
         }

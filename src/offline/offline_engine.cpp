@@ -123,7 +123,6 @@ void OfflineEngine::run(
 
     const auto initial =
         segmentation::InitialSegmenter::create(
-            resolved_model,
             graph,
             config,
             operator_profiles);

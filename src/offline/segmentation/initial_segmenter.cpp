@@ -34,7 +34,6 @@ bool supported(const core::OperatorProfile& profile,
 }
 
 core::SegmentInfo make_segment(
-    const onnx::GraphProto& graph,
     const core::GraphInfo& info,
     std::uint32_t level,
     std::uint32_t id,
@@ -98,7 +97,6 @@ core::SegmentInfo make_segment(
 }  // namespace
 
 std::vector<core::SegmentInfo> InitialSegmenter::create(
-    const onnx::ModelProto& model,
     const core::GraphInfo& graph,
     const config::OfflineConfig& config,
     const core::OperatorProfileMap& operator_profiles) {
@@ -118,7 +116,7 @@ std::vector<core::SegmentInfo> InitialSegmenter::create(
         }
 
         segments.push_back(make_segment(
-            model.graph(), graph, 0,
+            graph, 0,
             static_cast<std::uint32_t>(segments.size()), current));
         current.clear();
     };
@@ -171,7 +169,7 @@ std::vector<core::SegmentInfo> InitialSegmenter::create(
         if (fallback) {
             flush();
             segments.push_back(make_segment(
-                model.graph(), graph, 0,
+                graph, 0,
                 static_cast<std::uint32_t>(segments.size()),
                 {op.graph_index}));
         } else {

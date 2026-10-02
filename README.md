@@ -72,10 +72,15 @@ The design should remain extensible to additional execution providers later.
 
 ```bash
 ./setup.sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFLEXON_ENABLE_WARNINGS=ON
 cmake --build build -j"${nproc}"
 ctest --test-dir build --output-on-failure
 ```
+
+Compiler warnings are enabled by default. For GCC/Clang builds,
+`FLEXON_ENABLE_WARNINGS=ON` enables `-Wall`, `-Wextra`, `-Wpedantic`,
+`-Wunused-variable`, and `-Wunused-function`. Disable them with
+`-DFLEXON_ENABLE_WARNINGS=OFF` when needed.
 
 `setup.sh` is intended to provision/pin the third-party dependencies and
 download experiment models. Exact dependency versions belong in the project

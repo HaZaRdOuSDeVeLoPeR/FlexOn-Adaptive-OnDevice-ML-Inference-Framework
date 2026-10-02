@@ -25,16 +25,6 @@ const onnx::ValueInfoProto* find_value(
     return nullptr;
 }
 
-void add_fallback_value(
-    onnx::GraphProto* graph,
-    const std::string& name) {
-
-    auto* value = graph->add_input();
-    value->set_name(name);
-    auto* tensor = value->mutable_type()->mutable_tensor_type();
-    tensor->set_elem_type(onnx::TensorProto_DataType_FLOAT);
-}
-
 void add_value(
     onnx::GraphProto* graph,
     const onnx::GraphProto& source_graph,

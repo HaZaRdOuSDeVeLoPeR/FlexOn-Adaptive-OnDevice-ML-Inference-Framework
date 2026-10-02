@@ -14,6 +14,34 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(FLEXON_BUILD_TESTS "Build FlexOn tests" ON)
 option(FLEXON_BUILD_APPS "Build FlexOn applications" ON)
+option(FLEXON_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(FLEXON_ENABLE_WARNINGS "Enable strict compiler warnings" ON)
+
+if(FLEXON_ENABLE_ASAN)
+    add_compile_options(
+        -fsanitize=address
+        -fno-omit-frame-pointer
+        -g
+    )
+
+    add_link_options(
+        -fsanitize=address
+    )
+endif()
+
+if(FLEXON_ENABLE_WARNINGS)
+    add_compile_options(
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wall>
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wextra>
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wpedantic>
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wunused-variable>
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wunused-function>
+    )
+endif()
+
+# Milestone 2 uses the CUDA runtime for explicit CPU<->CUDA boundary copies.
+# ONNX Runtime remains responsible for executing CUDA segment kernels.
+find_package(CUDAToolkit REQUIRED)
 
 # All executables are generated into the project apps/ directory.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY
@@ -307,6 +335,7 @@ target_link_libraries(
         flexon_core
         flexon_onnxruntime
         yaml-cpp
+        CUDA::cudart
 )
 
 # ============================================================================
@@ -490,6 +519,7 @@ message(STATUS "========== FlexOn ${PROJECT_VERSION} ==========")
 message(STATUS "C++ standard:       C++${CMAKE_CXX_STANDARD}")
 message(STATUS "Build tests:        ${FLEXON_BUILD_TESTS}")
 message(STATUS "Build applications: ${FLEXON_BUILD_APPS}")
+message(STATUS "Compiler warnings:  ${FLEXON_ENABLE_WARNINGS}")
 message(STATUS "")
 message(STATUS "Include directory:  ${FLEXON_INCLUDE_DIR}")
 message(STATUS "Source directory:   ${FLEXON_SRC_DIR}")

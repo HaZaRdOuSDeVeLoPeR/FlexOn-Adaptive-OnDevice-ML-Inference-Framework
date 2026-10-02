@@ -1,4 +1,4 @@
-# Online Phase — Milestone 1
+# Online Phase — Milestone 1 / 2
 
 ## Goal
 
@@ -17,18 +17,18 @@ This milestone establishes the correctness boundary for the online runtime:
 - verify that the final segment produces the declared level outputs
 - expose CPU, CUDA, and offline-cost-based `auto` resource selection
 
-## Deliberate limitations
+## Milestone 2 additions
 
-This is **not** the final FlexOn scheduler. In particular, this milestone does
-not implement:
+Milestone 2 makes CPU/CUDA placement explicit at segment boundaries:
 
-- I/O binding or explicit device-buffer management
-- zero-copy/buffer sharing
-- adaptive segmentation-level selection
-- runtime resource monitoring
-- AD/MI scheduling
-- degradation/recovery
-- contention experiments
+- tensors are inspected for their current ORT memory placement
+- cross-resource inputs are explicitly copied into the destination resource
+- boundary-copy time is measured separately from segment execution time
+- segment outputs are allocated on the selected resource
+- an explicit per-segment resource plan can exercise CPU/CUDA switching
+
+The runtime still does not implement adaptive scheduling, monitoring, AD/MI,
+degradation, or recovery. Those remain later milestones.
 
 The current executor intentionally uses ordinary ORT `Run()` and clones input
 values when necessary to keep tensor lifetime correct across residual/skip
@@ -38,8 +38,8 @@ replaced by explicit lifetime-aware buffer management in later milestones.
 ## CLI
 
 ```text
-./apps/flexon_online --artifact <dir> [--level N] [--resource cpu|cuda|auto] [--iterations N]
-./apps/flexon_online_tester --artifact <dir> [--level N] [--resource cpu|cuda|auto]
+./apps/flexon_online --artifact <dir> [--level N] [--resource cpu|cuda|auto] [--resource-plan cpu,cuda,...] [--iterations N]
+./apps/flexon_online_tester --artifact <dir> [--level N] [--resource cpu|cuda|auto] [--resource-plan cpu,cuda,...]
 ```
 
 The default resource is CPU and the default level/iteration count is 0/1.
