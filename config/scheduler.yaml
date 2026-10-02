@@ -3,7 +3,6 @@ level_selection:
   beta: 1.6
 
 resource_selection:
-  remaining_capacity_floor: 0.05
   sample_interval_ms: 50
 
 recovery:

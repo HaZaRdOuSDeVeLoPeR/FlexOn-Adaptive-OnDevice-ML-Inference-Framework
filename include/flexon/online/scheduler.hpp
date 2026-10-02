@@ -14,13 +14,11 @@ namespace flexon::online {
  * Runtime scheduler parameters corresponding to FlexOn's online policy.
  *
  * Defaults match the values reported in the paper: alpha=1.2,
- * beta=1.6 and gamma=1.3. The remaining-capacity floor prevents
- * division by a value approaching zero.
+ * beta=1.6 and gamma=1.3.
  */
 struct SchedulerConfig {
     double alpha{1.2};
     double beta{1.6};
-    double remaining_capacity_floor{0.05};
     double gamma{1.3};
     bool recovery_enabled{true};
     std::uint32_t resource_sample_interval_ms{50};
@@ -65,6 +63,17 @@ public:
         RuntimeResource current_resource,
         double current_measured_ms,
         const SchedulerSegmentCosts& next) const;
+
+    // Recovery is evaluated while the current segment is executing. The
+    // returned decision is the best alternative resource according to the
+    // paper's Eq. (5) right-hand side. Its score is d_r * C_r(s_i).
+    SchedulerDecision select_recovery_resource(
+        const SchedulerSegmentCosts& current,
+        RuntimeResource current_resource) const;
+
+    bool should_trigger_recovery(
+        double current_elapsed_ms,
+        double alternative_score) const;
 
     std::uint32_t select_next_level(
         std::uint32_t current_level,

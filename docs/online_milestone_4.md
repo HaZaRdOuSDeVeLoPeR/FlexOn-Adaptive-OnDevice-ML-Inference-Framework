@@ -51,7 +51,10 @@ and selects the supported resource minimizing:
 d_r * C_r(next_segment)
 ```
 
-where `U_r` is the monitored remaining capacity.
+where `U_r` is the monitored remaining capacity. For non-current resources,
+the implementation uses `1 / (U_r + epsilon)` with a small numerical epsilon
+only to guard the zero-capacity case. This epsilon is an implementation
+safeguard, not a paper parameter.
 
 The first segment has no preceding segment measurement, so the implementation
 uses `1/U_r * C_r(first_segment)` as its initial resource-selection score.

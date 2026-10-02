@@ -51,3 +51,10 @@ Before implementing recovery, demonstrate:
 - boundary-copy cost is visible separately from compute cost.
 
 Only after these are true should the adaptive scheduler be benchmarked.
+
+
+## Current online milestone
+
+**Milestone 5: Recovery controller** — implemented as speculative execution
+with first-result selection. Recovery is evaluated while a segment is already
+running; it is not part of the pre-execution resource-selection decision.

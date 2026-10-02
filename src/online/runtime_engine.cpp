@@ -11,17 +11,22 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <future>
 #include <random>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <mutex>
+#include <thread>
 
 namespace flexon::online {
 namespace {
@@ -423,6 +428,7 @@ public:
     }
 
     std::shared_ptr<BufferLease> acquire(const BufferKey& key) {
+        std::lock_guard<std::mutex> lock(mutex_);
         auto& free_list = free_blocks_[key];
         if (!free_list.empty()) {
             auto* block = free_list.back();
@@ -459,12 +465,30 @@ public:
         return std::shared_ptr<BufferLease>(new BufferLease{this, raw});
     }
 
-    std::size_t allocation_count() const noexcept { return allocation_count_; }
-    std::size_t reuse_count() const noexcept { return reuse_count_; }
-    std::size_t allocated_bytes() const noexcept { return allocated_bytes_; }
-    std::size_t peak_live_bytes() const noexcept { return peak_live_bytes_; }
+    std::size_t allocation_count() const noexcept {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return allocation_count_;
+    }
+    std::size_t reuse_count() const noexcept {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return reuse_count_;
+    }
+    std::size_t allocated_bytes() const noexcept {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return allocated_bytes_;
+    }
+    std::size_t peak_live_bytes() const noexcept {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return peak_live_bytes_;
+    }
 
     std::size_t live_bytes() const noexcept {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return live_bytes_unlocked();
+    }
+
+private:
+    std::size_t live_bytes_unlocked() const noexcept {
         std::size_t total = 0;
         for (const auto& block : blocks_) {
             if (in_use_.find(block.get()) != in_use_.end()) {
@@ -474,19 +498,20 @@ public:
         return total;
     }
 
-private:
     friend struct BufferLease;
 
     void release(BufferBlock* block) {
         if (block == nullptr) return;
+        std::lock_guard<std::mutex> lock(mutex_);
         free_blocks_[block->key].push_back(block);
         in_use_.erase(block);
     }
 
     void update_peak_live_bytes() noexcept {
-        peak_live_bytes_ = std::max(peak_live_bytes_, live_bytes());
+        peak_live_bytes_ = std::max(peak_live_bytes_, live_bytes_unlocked());
     }
 
+    mutable std::mutex mutex_;
     std::vector<std::unique_ptr<BufferBlock>> blocks_;
     std::unordered_map<BufferKey, std::vector<BufferBlock*>, BufferKeyHash>
         free_blocks_;
@@ -612,12 +637,19 @@ void check_cuda(cudaError_t status, const char* operation) {
     }
 }
 
-SegmentExecutionStats execute_segment(
+struct SegmentExecutionResult {
+    SegmentExecutionStats stats;
+    std::chrono::steady_clock::time_point completed_at{};
+    std::vector<std::pair<std::string, RuntimeTensor>> outputs;
+};
+
+SegmentExecutionResult execute_segment_once(
     SegmentRuntime& segment,
     RuntimeResource requested_resource,
     std::unordered_map<std::string, RuntimeTensor>& tensor_store,
     BufferArena& arena,
-    Ort::AllocatorWithDefaultOptions& allocator) {
+    Ort::AllocatorWithDefaultOptions& allocator,
+    const std::shared_ptr<std::promise<void>>& inputs_bound = nullptr) {
 
     const auto resource = choose_concrete_resource(segment, requested_resource);
     auto* prepared = find_session(segment, resource);
@@ -665,10 +697,8 @@ SegmentExecutionStats execute_segment(
             auto lease = arena.acquire(buffer_key(resource, shape, type));
             const auto bytes = lease->block->bytes;
 
-            auto transferred = RuntimeTensor{};
-            transferred.lease = lease;
             const auto memory_info = memory_info_for_resource(resource);
-            transferred.value = Ort::Value::CreateTensor(
+            Ort::Value transferred = Ort::Value::CreateTensor(
                 memory_info,
                 lease->block->data,
                 bytes,
@@ -698,9 +728,16 @@ SegmentExecutionStats execute_segment(
             boundary_copy_ms += std::chrono::duration<double, std::milli>(
                 end - start).count();
 
-            io_binding.BindInput(input_name.c_str(), transferred.value);
+            io_binding.BindInput(input_name.c_str(), transferred);
             transferred_inputs.push_back(std::move(lease));
         }
+    }
+
+    // Recovery executions may continue after the winning execution returns.
+    // Signal once this worker has finished reading the shared tensor store so
+    // the caller can safely update tensor liveness/output ownership.
+    if (inputs_bound) {
+        inputs_bound->set_value();
     }
 
     for (std::size_t i = 0; i < output_count; ++i) {
@@ -723,8 +760,6 @@ SegmentExecutionStats execute_segment(
         }
 
         if (!concrete) {
-            // The arena requires a known allocation size. Preserve the existing
-            // ORT allocation path for genuinely dynamic segment outputs.
             io_binding.BindOutput(output_name_storage[i].c_str(), memory_info);
             output_leases.push_back(nullptr);
             continue;
@@ -742,9 +777,6 @@ SegmentExecutionStats execute_segment(
             shape.size(),
             type);
         io_binding.BindOutput(output_name_storage[i].c_str(), output);
-        // BindOutput does not take ownership of our C++ wrapper. Keep the
-        // wrapper alive through a temporary store below, and keep its backing
-        // allocation alive in output_leases until GetOutputValues completes.
         output_leases.push_back(std::move(lease));
     }
 
@@ -763,22 +795,21 @@ SegmentExecutionStats execute_segment(
             " returned an unexpected number of outputs");
     }
 
-    // If outputs were externally bound, the returned Ort::Value wrappers point
-    // at the arena allocation. Move both the wrapper and its lease into the
-    // tensor store so the allocation survives until tensor liveness expires.
+    SegmentExecutionResult result;
+    result.stats = SegmentExecutionStats{
+        resource,
+        elapsed_ms,
+        boundary_copy_ms};
+    result.completed_at = end;
+    result.outputs.reserve(outputs.size());
+
     for (std::size_t i = 0; i < outputs.size(); ++i) {
         RuntimeTensor tensor;
         tensor.lease = std::move(output_leases[i]);
         tensor.value = std::move(outputs[i]);
-
-        auto existing = tensor_store.find(output_name_storage[i]);
-        if (existing != tensor_store.end()) {
-            existing->second.value = Ort::Value{nullptr};
-            existing->second.lease.reset();
-            existing->second = std::move(tensor);
-        } else {
-            tensor_store.emplace(output_name_storage[i], std::move(tensor));
-        }
+        result.outputs.emplace_back(
+            output_name_storage[i],
+            std::move(tensor));
     }
 
     io_binding.ClearBoundOutputs();
@@ -790,20 +821,266 @@ SegmentExecutionStats execute_segment(
             "cudaDeviceSynchronize before releasing transferred inputs");
     }
 
-    std::cout << "    segment " << segment.manifest.id
-              << " [" << resource_name(resource) << "] "
-              << elapsed_ms << " ms"
-              << " | boundary_copy=" << boundary_copy_ms << " ms"
+    return result;
+}
+
+void commit_segment_outputs(
+    SegmentExecutionResult& result,
+    std::unordered_map<std::string, RuntimeTensor>& tensor_store) {
+
+    for (auto& output : result.outputs) {
+        auto existing = tensor_store.find(output.first);
+        if (existing != tensor_store.end()) {
+            existing->second.value = Ort::Value{nullptr};
+            existing->second.lease.reset();
+            existing->second = std::move(output.second);
+        } else {
+            tensor_store.emplace(
+                output.first,
+                std::move(output.second));
+        }
+    }
+}
+
+void print_segment_stats(
+    const SegmentManifest& manifest,
+    const SegmentExecutionStats& stats,
+    const BufferArena& arena) {
+
+    std::cout << "    segment " << manifest.id
+              << " [" << resource_name(stats.resource) << "] "
+              << stats.elapsed_ms << " ms"
+              << " | boundary_copy=" << stats.boundary_copy_ms << " ms"
               << " | arena_allocations=" << arena.allocation_count()
               << " | arena_reuses=" << arena.reuse_count()
               << " | arena_bytes=" << arena.allocated_bytes()
               << " | arena_peak_live_bytes=" << arena.peak_live_bytes() << "\n";
-
-    return SegmentExecutionStats{
-        resource,
-        elapsed_ms,
-        boundary_copy_ms};
 }
+
+SegmentExecutionStats execute_segment(
+    SegmentRuntime& segment,
+    RuntimeResource requested_resource,
+    std::unordered_map<std::string, RuntimeTensor>& tensor_store,
+    BufferArena& arena,
+    Ort::AllocatorWithDefaultOptions& allocator) {
+
+    auto result = execute_segment_once(
+        segment,
+        requested_resource,
+        tensor_store,
+        arena,
+        allocator);
+    const auto stats = result.stats;
+    commit_segment_outputs(result, tensor_store);
+    print_segment_stats(segment.manifest, stats, arena);
+    return stats;
+}
+
+SegmentExecutionStats execute_segment_with_recovery(
+    SegmentRuntime& segment,
+    RuntimeResource primary_resource,
+    const SchedulerSegmentCosts& costs,
+    OnlineScheduler& scheduler,
+    const SchedulerConfig& scheduler_config,
+    std::unordered_map<std::string, RuntimeTensor>& tensor_store,
+    BufferArena& arena,
+    Ort::AllocatorWithDefaultOptions& allocator,
+    std::vector<std::future<SegmentExecutionResult>>& background_recoveries) {
+
+    const auto primary_ready = std::make_shared<std::promise<void>>();
+    auto primary_ready_future = primary_ready->get_future();
+
+    auto launch = [&](RuntimeResource resource,
+                      const std::shared_ptr<std::promise<void>>& ready) {
+        return std::async(
+            std::launch::async,
+            [&segment, resource, &tensor_store, &arena, &allocator, ready]() {
+                try {
+                    return execute_segment_once(
+                        segment,
+                        resource,
+                        tensor_store,
+                        arena,
+                        allocator,
+                        ready);
+                } catch (...) {
+                    try {
+                        ready->set_exception(std::current_exception());
+                    } catch (...) {
+                    }
+                    throw;
+                }
+            });
+    };
+
+    auto primary_future = launch(primary_resource, primary_ready);
+
+    // Wait until the primary worker has finished reading its input tensors.
+    // From this point onward a speculative recovery worker can safely continue
+    // without racing tensor-store liveness updates in the caller.
+    primary_ready_future.get();
+
+    bool recovery_triggered = false;
+    RuntimeResource recovery_resource = RuntimeResource::CPU;
+    std::future<SegmentExecutionResult> recovery_future;
+
+    const auto segment_start = std::chrono::steady_clock::now();
+    while (primary_future.wait_for(std::chrono::milliseconds(0)) !=
+           std::future_status::ready) {
+
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsed_ms =
+            std::chrono::duration<double, std::milli>(now - segment_start).count();
+
+        if (!recovery_triggered && scheduler_config.recovery_enabled) {
+            const auto alternative =
+                scheduler.select_recovery_resource(costs, primary_resource);
+
+            if (scheduler.should_trigger_recovery(
+                    elapsed_ms, alternative.score)) {
+
+                // Avoid launching a speculative execution if the primary
+                // completed between the polling check and this decision.
+                if (primary_future.wait_for(std::chrono::milliseconds(0)) ==
+                    std::future_status::ready) {
+                    break;
+                }
+
+                recovery_triggered = true;
+                recovery_resource = alternative.resource;
+
+                std::cout
+                    << "[recovery] segment " << segment.manifest.id
+                    << " primary=" << resource_name(primary_resource)
+                    << " elapsed_ms=" << elapsed_ms
+                    << " alternative=" << resource_name(recovery_resource)
+                    << " alternative_score=" << alternative.score
+                    << " gamma=" << scheduler_config.gamma << '\n';
+
+                const auto recovery_ready =
+                    std::make_shared<std::promise<void>>();
+                auto recovery_ready_future = recovery_ready->get_future();
+                recovery_future = launch(recovery_resource, recovery_ready);
+                recovery_ready_future.get();
+
+                // The primary may have completed while the alternative was
+                // being prepared. Prefer whichever result is observed first.
+                while (recovery_future.wait_for(std::chrono::milliseconds(0)) !=
+                           std::future_status::ready &&
+                       primary_future.wait_for(std::chrono::milliseconds(0)) !=
+                           std::future_status::ready) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+
+                const bool recovery_ready_now =
+                    recovery_future.wait_for(std::chrono::milliseconds(0)) ==
+                    std::future_status::ready;
+                const bool primary_ready_now =
+                    primary_future.wait_for(std::chrono::milliseconds(0)) ==
+                    std::future_status::ready;
+
+                if (recovery_ready_now && primary_ready_now) {
+                    std::optional<SegmentExecutionResult> recovery_result;
+                    std::optional<SegmentExecutionResult> primary_result;
+
+                    try {
+                        recovery_result.emplace(recovery_future.get());
+                    } catch (...) {
+                    }
+                    try {
+                        primary_result.emplace(primary_future.get());
+                    } catch (...) {
+                    }
+
+                    if (recovery_result && primary_result) {
+                        if (recovery_result->completed_at <
+                            primary_result->completed_at) {
+                            recovery_result->stats.elapsed_ms =
+                                std::chrono::duration<double, std::milli>(
+                                    recovery_result->completed_at - segment_start).count();
+                            commit_segment_outputs(*recovery_result, tensor_store);
+                            print_segment_stats(
+                                segment.manifest, recovery_result->stats, arena);
+                            std::cout << "[recovery] alternative result won\n";
+                            return recovery_result->stats;
+                        }
+
+                        primary_result->stats.elapsed_ms =
+                            std::chrono::duration<double, std::milli>(
+                                primary_result->completed_at - segment_start).count();
+                        commit_segment_outputs(*primary_result, tensor_store);
+                        print_segment_stats(
+                            segment.manifest, primary_result->stats, arena);
+                        std::cout << "[recovery] primary result won\n";
+                        return primary_result->stats;
+                    }
+
+                    if (recovery_result) {
+                        recovery_result->stats.elapsed_ms =
+                            std::chrono::duration<double, std::milli>(
+                                recovery_result->completed_at - segment_start).count();
+                        commit_segment_outputs(*recovery_result, tensor_store);
+                        print_segment_stats(
+                            segment.manifest, recovery_result->stats, arena);
+                        std::cout << "[recovery] alternative result won\n";
+                        return recovery_result->stats;
+                    }
+
+                    if (primary_result) {
+                        primary_result->stats.elapsed_ms =
+                            std::chrono::duration<double, std::milli>(
+                                primary_result->completed_at - segment_start).count();
+                        commit_segment_outputs(*primary_result, tensor_store);
+                        print_segment_stats(
+                            segment.manifest, primary_result->stats, arena);
+                        std::cout << "[recovery] primary result won\n";
+                        return primary_result->stats;
+                    }
+
+                    throw std::runtime_error(
+                        "Both primary and recovery executions failed");
+                }
+
+                if (recovery_ready_now) {
+                    try {
+                        auto result = recovery_future.get();
+                        result.stats.elapsed_ms =
+                            std::chrono::duration<double, std::milli>(
+                                result.completed_at - segment_start).count();
+                        background_recoveries.push_back(std::move(primary_future));
+                        commit_segment_outputs(result, tensor_store);
+                        print_segment_stats(segment.manifest, result.stats, arena);
+                        std::cout << "[recovery] alternative result won\n";
+                        return result.stats;
+                    } catch (...) {
+                        // A speculative recovery failure must not invalidate a
+                        // successful primary execution.
+                    }
+                }
+
+                auto result = primary_future.get();
+                result.stats.elapsed_ms =
+                    std::chrono::duration<double, std::milli>(
+                        result.completed_at - segment_start).count();
+                if (recovery_future.valid()) {
+                    background_recoveries.push_back(std::move(recovery_future));
+                }
+                commit_segment_outputs(result, tensor_store);
+                print_segment_stats(segment.manifest, result.stats, arena);
+                std::cout << "[recovery] primary result won\n";
+                return result.stats;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    auto result = primary_future.get();
+    commit_segment_outputs(result, tensor_store);
+    print_segment_stats(segment.manifest, result.stats, arena);
+    return result.stats;
+}
+
 
 }  // namespace
 
@@ -952,6 +1229,7 @@ void FlexOnRuntime::run(const RunOptions& options) {
                 level.back().manifest.output_names.end());
 
             std::unordered_map<std::string, RuntimeTensor> tensor_store;
+            std::vector<std::future<SegmentExecutionResult>> background_recoveries;
 
             RuntimeResource previous_resource = RuntimeResource::CPU;
             SegmentExecutionStats previous_stats{};
@@ -1026,12 +1304,27 @@ void FlexOnRuntime::run(const RunOptions& options) {
                         << decision.remaining_capacity << '\n';
                 }
 
-                const auto stats = execute_segment(
-                    segment,
-                    requested_resource,
-                    tensor_store,
-                    arena,
-                    impl_->state->allocator);
+                SegmentExecutionStats stats;
+                if (dynamic_resource_selection &&
+                    scheduler_config.recovery_enabled) {
+                    stats = execute_segment_with_recovery(
+                        segment,
+                        requested_resource,
+                        scheduler_costs(segment.manifest),
+                        scheduler,
+                        scheduler_config,
+                        tensor_store,
+                        arena,
+                        impl_->state->allocator,
+                        background_recoveries);
+                } else {
+                    stats = execute_segment(
+                        segment,
+                        requested_resource,
+                        tensor_store,
+                        arena,
+                        impl_->state->allocator);
+                }
 
                 const auto selected_expected =
                     stats.resource == RuntimeResource::CPU
@@ -1061,6 +1354,19 @@ void FlexOnRuntime::run(const RunOptions& options) {
                     }
                 }
             }
+
+            for (auto& recovery : background_recoveries) {
+                try {
+                    recovery.get();
+                } catch (const std::exception& ex) {
+                    std::cout << "[recovery] speculative execution failed after "
+                              << "winner was selected: " << ex.what() << '\n';
+                } catch (...) {
+                    std::cout << "[recovery] speculative execution failed after "
+                              << "winner was selected\n";
+                }
+            }
+            background_recoveries.clear();
 
             for (const auto& output_name :
                  level.back().manifest.output_names) {

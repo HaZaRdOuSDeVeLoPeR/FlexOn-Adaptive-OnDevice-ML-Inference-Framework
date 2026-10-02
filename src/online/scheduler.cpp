@@ -136,14 +136,6 @@ SchedulerConfig OnlineScheduler::load_config(
         if (node["beta"]) config.beta = node["beta"].as<double>();
     }
 
-    if (root["resource_selection"]) {
-        const auto node = root["resource_selection"];
-        if (node["remaining_capacity_floor"]) {
-            config.remaining_capacity_floor =
-                node["remaining_capacity_floor"].as<double>();
-        }
-    }
-
     if (root["recovery"]) {
         const auto node = root["recovery"];
         if (node["gamma"]) config.gamma = node["gamma"].as<double>();
@@ -160,8 +152,7 @@ SchedulerConfig OnlineScheduler::load_config(
 
     config.alpha = std::max(0.0, config.alpha);
     config.beta = std::max(config.alpha, config.beta);
-    config.remaining_capacity_floor =
-        std::clamp(config.remaining_capacity_floor, 0.001, 1.0);
+    config.gamma = std::max(0.0, config.gamma);
     config.resource_sample_interval_ms = std::max<std::uint32_t>(
         10, config.resource_sample_interval_ms);
 
@@ -224,10 +215,11 @@ SchedulerDecision OnlineScheduler::select_first_resource(
             candidate == RuntimeResource::CPU ? next.cpu : next.cuda;
         if (!cost.supported || !std::isfinite(cost.expected_ms)) continue;
 
+        constexpr double kCapacityEpsilon = 1.0e-9;
         const double capacity =
-            std::max(config_.remaining_capacity_floor,
-                     remaining_capacity(candidate));
-        const double degradation = 1.0 / capacity;
+            std::clamp(remaining_capacity(candidate), 0.0, 1.0);
+        const double degradation =
+            1.0 / (capacity + kCapacityEpsilon);
         const double score = degradation * cost.expected_ms;
 
         if (score < best.score) {
@@ -279,10 +271,10 @@ SchedulerDecision OnlineScheduler::select_next_resource(
             capacity = std::clamp(
                 1.0 / std::max(degradation, 1.0e-9), 0.0, 1.0);
         } else {
-            capacity = std::max(
-                config_.remaining_capacity_floor,
-                remaining_capacity(candidate));
-            degradation = 1.0 / capacity;
+            constexpr double kCapacityEpsilon = 1.0e-9;
+            capacity = std::clamp(
+                remaining_capacity(candidate), 0.0, 1.0);
+            degradation = 1.0 / (capacity + kCapacityEpsilon);
         }
 
         const double score = degradation * cost.expected_ms;
@@ -298,6 +290,54 @@ SchedulerDecision OnlineScheduler::select_next_resource(
     }
 
     return best;
+}
+
+SchedulerDecision OnlineScheduler::select_recovery_resource(
+    const SchedulerSegmentCosts& current,
+    RuntimeResource current_resource) const {
+
+    SchedulerDecision best;
+
+    for (const auto candidate :
+         {RuntimeResource::CPU, RuntimeResource::CUDA}) {
+        if (candidate == current_resource) continue;
+
+        const auto cost =
+            candidate == RuntimeResource::CPU ? current.cpu : current.cuda;
+        if (!cost.supported || !std::isfinite(cost.expected_ms)) continue;
+
+        constexpr double kCapacityEpsilon = 1.0e-9;
+        const double capacity =
+            std::clamp(remaining_capacity(candidate), 0.0, 1.0);
+        const double degradation =
+            1.0 / (capacity + kCapacityEpsilon);
+        const double score = degradation * cost.expected_ms;
+
+        if (score < best.score) {
+            best = SchedulerDecision{
+                candidate, score, degradation, capacity};
+        }
+    }
+
+    return best;
+}
+
+bool OnlineScheduler::should_trigger_recovery(
+    double current_elapsed_ms,
+    double alternative_score) const {
+
+    if (!config_.recovery_enabled ||
+        !std::isfinite(current_elapsed_ms) ||
+        !std::isfinite(alternative_score) ||
+        current_elapsed_ms < 0.0 ||
+        alternative_score < 0.0) {
+        return false;
+    }
+
+    // Eq. (5): d* C*(s_i) > gamma * min_{r != r*} d_r C_r(s_i).
+    // While the segment is executing, the observed elapsed time is the
+    // current estimate of d* C*(s_i), since d* = R/C*(s_i).
+    return current_elapsed_ms > config_.gamma * alternative_score;
 }
 
 std::uint32_t OnlineScheduler::select_next_level(

@@ -2,13 +2,11 @@
 
 #include <cassert>
 #include <cmath>
-#include <filesystem>
 
 int main() {
     flexon::online::SchedulerConfig config;
     config.alpha = 1.2;
     config.beta = 1.6;
-    config.remaining_capacity_floor = 0.05;
 
     flexon::online::OnlineScheduler scheduler(config);
 
@@ -73,6 +71,14 @@ int main() {
     assert(next.resource == flexon::online::RuntimeResource::CUDA);
     assert(next.score > 0.0);
     assert(std::isfinite(next.score));
+
+    const auto recovery = scheduler.select_recovery_resource(
+        costs, flexon::online::RuntimeResource::CPU);
+    assert(recovery.resource == flexon::online::RuntimeResource::CUDA);
+    assert(recovery.score > 0.0);
+    assert(std::isfinite(recovery.score));
+    assert(!scheduler.should_trigger_recovery(2.5, recovery.score));
+    assert(scheduler.should_trigger_recovery(2.6 + 1.0e-6, recovery.score));
 
     return 0;
 }
