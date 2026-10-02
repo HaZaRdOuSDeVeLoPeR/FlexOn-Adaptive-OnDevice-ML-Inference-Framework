@@ -36,7 +36,7 @@ This milestone does not implement:
 - adaptive segmentation-level selection
 - AD/MI scheduling
 - degradation/recovery
-- buffer reuse/zero-copy optimization
+- adaptive buffer reuse/zero-copy optimization
 - contention experiments
 
 ## Test commands
@@ -95,10 +95,10 @@ resource's ORT allocator and performs the boundary copy explicitly with the
 CUDA runtime. The copy is measured separately as `boundary_copy`, while the
 segment execution measurement remains the ORT execution time.
 
-This also establishes the memory-ownership boundary needed for the next memory
-optimization: an activation arena can own reusable CPU and CUDA buffers and
-IoBinding can bind those existing tensors to segment inputs/outputs. That is
-the ONNX Runtime analogue of the paper's pointer-based buffer sharing.
+This also establishes the memory-ownership boundary used by Milestone 3: an
+activation arena can own reusable CPU and CUDA buffers and IoBinding can bind
+those existing tensors to segment inputs/outputs. That is the ONNX Runtime
+analogue of the paper's pointer-based buffer sharing.
 
 The paper's CPU/GPU non-shareable-buffer observation remains relevant: a buffer
 can only be reused while its shape/type/device and lifetime are compatible.

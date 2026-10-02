@@ -30,12 +30,13 @@ Each step follows:
 3. Session pool
 4. Tensor/device transport
 5. Segment executor
-6. Resource monitor
-7. Resource selector
-8. Level selector
-9. Recovery controller
-10. Runtime telemetry
-11. Online facade
+6. Shared buffer arena
+7. Resource monitor
+8. Resource selector
+9. Level selector
+10. Recovery controller
+11. Runtime telemetry
+12. Online facade
 
 ## Performance gates
 

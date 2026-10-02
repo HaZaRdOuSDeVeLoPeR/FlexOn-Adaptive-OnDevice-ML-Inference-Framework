@@ -9,13 +9,16 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <random>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -323,8 +326,201 @@ RuntimeResource choose_resource(const SegmentRuntime& segment,
                                           : RuntimeResource::CUDA;
 }
 
+void check_cuda(cudaError_t status, const char* operation);
+
+struct BufferKey {
+    RuntimeResource resource{RuntimeResource::CPU};
+    std::size_t bytes{0};
+    ONNXTensorElementDataType type{ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED};
+    std::vector<std::int64_t> shape;
+
+    bool operator==(const BufferKey& other) const noexcept {
+        return resource == other.resource &&
+               bytes == other.bytes &&
+               type == other.type &&
+               shape == other.shape;
+    }
+};
+
+struct BufferKeyHash {
+    std::size_t operator()(const BufferKey& key) const noexcept {
+        std::size_t hash = static_cast<std::size_t>(key.resource);
+        hash ^= key.bytes + static_cast<std::size_t>(0x9e3779b9) +
+                (hash << 6) + (hash >> 2);
+        hash ^= static_cast<std::size_t>(key.type) +
+                static_cast<std::size_t>(0x9e3779b9) +
+                (hash << 6) + (hash >> 2);
+        for (const auto dim : key.shape) {
+            const auto value = static_cast<std::size_t>(dim);
+            hash ^= value + static_cast<std::size_t>(0x9e3779b9) +
+                    (hash << 6) + (hash >> 2);
+        }
+        return hash;
+    }
+};
+
+struct BufferBlock {
+    RuntimeResource resource{RuntimeResource::CPU};
+    void* data{nullptr};
+    std::size_t bytes{0};
+    BufferKey key;
+};
+
+class BufferArena;
+
+struct BufferLease {
+    BufferArena* arena{nullptr};
+    BufferBlock* block{nullptr};
+
+    ~BufferLease();
+
+    BufferLease(const BufferLease&) = delete;
+    BufferLease& operator=(const BufferLease&) = delete;
+};
+
+class BufferArena {
+public:
+    ~BufferArena() {
+        // All RuntimeTensor leases are destroyed before the arena because the
+        // arena is declared before the per-run tensor store.
+        for (auto& block : blocks_) {
+            if (block->data == nullptr) continue;
+            if (block->resource == RuntimeResource::CUDA) {
+                cudaFree(block->data);
+            } else {
+                std::free(block->data);
+            }
+        }
+    }
+
+    std::shared_ptr<BufferLease> acquire(const BufferKey& key) {
+        auto& free_list = free_blocks_[key];
+        if (!free_list.empty()) {
+            auto* block = free_list.back();
+            free_list.pop_back();
+            in_use_.insert(block);
+            ++reuse_count_;
+            update_peak_live_bytes();
+            return std::shared_ptr<BufferLease>(
+                new BufferLease{this, block});
+        }
+
+        auto block = std::make_unique<BufferBlock>();
+        block->resource = key.resource;
+        block->bytes = key.bytes;
+        block->key = key;
+
+        if (key.bytes != 0) {
+            if (key.resource == RuntimeResource::CUDA) {
+                check_cuda(cudaMalloc(&block->data, key.bytes), "cudaMalloc");
+            } else {
+                block->data = std::malloc(key.bytes);
+                if (block->data == nullptr) {
+                    throw std::bad_alloc();
+                }
+            }
+        }
+
+        auto* raw = block.get();
+        blocks_.push_back(std::move(block));
+        in_use_.insert(raw);
+        ++allocation_count_;
+        allocated_bytes_ += key.bytes;
+        update_peak_live_bytes();
+        return std::shared_ptr<BufferLease>(new BufferLease{this, raw});
+    }
+
+    std::size_t allocation_count() const noexcept { return allocation_count_; }
+    std::size_t reuse_count() const noexcept { return reuse_count_; }
+    std::size_t allocated_bytes() const noexcept { return allocated_bytes_; }
+    std::size_t peak_live_bytes() const noexcept { return peak_live_bytes_; }
+
+    std::size_t live_bytes() const noexcept {
+        std::size_t total = 0;
+        for (const auto& block : blocks_) {
+            if (in_use_.find(block.get()) != in_use_.end()) {
+                total += block->bytes;
+            }
+        }
+        return total;
+    }
+
+private:
+    friend struct BufferLease;
+
+    void release(BufferBlock* block) {
+        if (block == nullptr) return;
+        free_blocks_[block->key].push_back(block);
+        in_use_.erase(block);
+    }
+
+    void update_peak_live_bytes() noexcept {
+        peak_live_bytes_ = std::max(peak_live_bytes_, live_bytes());
+    }
+
+    std::vector<std::unique_ptr<BufferBlock>> blocks_;
+    std::unordered_map<BufferKey, std::vector<BufferBlock*>, BufferKeyHash>
+        free_blocks_;
+    std::unordered_set<BufferBlock*> in_use_;
+    std::size_t allocation_count_{0};
+    std::size_t reuse_count_{0};
+    std::size_t allocated_bytes_{0};
+    std::size_t peak_live_bytes_{0};
+};
+
+BufferLease::~BufferLease() {
+    if (arena != nullptr && block != nullptr) {
+        arena->release(block);
+    }
+}
+
+struct RuntimeTensor {
+    // Declared before value so destruction is value first, lease second.
+    // This guarantees that an externally-backed Ort::Value is gone before
+    // its arena allocation becomes reusable.
+    std::shared_ptr<BufferLease> lease;
+    Ort::Value value{nullptr};
+};
+
+BufferKey buffer_key(
+    RuntimeResource resource,
+    const std::vector<std::int64_t>& shape,
+    ONNXTensorElementDataType type) {
+    const auto count = element_count(shape);
+    const auto checked_bytes = [count](std::size_t element_bytes) {
+        if (count != 0 &&
+            element_bytes > std::numeric_limits<std::size_t>::max() / count) {
+            throw std::runtime_error("Tensor byte size overflows size_t");
+        }
+        return count * element_bytes;
+    };
+    std::size_t bytes = 0;
+    switch (type) {
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT: bytes = checked_bytes(sizeof(float)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE: bytes = checked_bytes(sizeof(double)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: bytes = checked_bytes(sizeof(std::int64_t)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32: bytes = checked_bytes(sizeof(std::int32_t)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8: bytes = checked_bytes(sizeof(std::uint8_t)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8: bytes = checked_bytes(sizeof(std::int8_t)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16: bytes = checked_bytes(sizeof(std::uint16_t)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16: bytes = checked_bytes(sizeof(std::int16_t)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32: bytes = checked_bytes(sizeof(std::uint32_t)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64: bytes = checked_bytes(sizeof(std::uint64_t)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL: bytes = checked_bytes(sizeof(bool)); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16: bytes = checked_bytes(2); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16: bytes = checked_bytes(2); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX64: bytes = checked_bytes(8); break;
+        case ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX128: bytes = checked_bytes(16); break;
+        default:
+            throw std::runtime_error(
+                "Unsupported tensor type for buffer arena: " +
+                std::to_string(static_cast<int>(type)));
+    }
+    return BufferKey{resource, bytes, type, shape};
+}
+
 void add_initial_inputs(
-    std::unordered_map<std::string, Ort::Value>& tensor_store,
+    std::unordered_map<std::string, RuntimeTensor>& tensor_store,
     const std::vector<std::string>& input_names,
     Ort::Session& first_session,
     Ort::AllocatorWithDefaultOptions& allocator) {
@@ -335,9 +531,10 @@ void add_initial_inputs(
         const std::string tensor_name(name.get());
         if (tensor_store.find(tensor_name) != tensor_store.end()) continue;
         auto type_info = first_session.GetInputTypeInfo(i);
-        tensor_store.emplace(
-            tensor_name,
-            make_input_value(allocator, type_info, static_cast<std::uint32_t>(i + 1)));
+        RuntimeTensor tensor;
+        tensor.value = make_input_value(
+            allocator, type_info, static_cast<std::uint32_t>(i + 1));
+        tensor_store.emplace(tensor_name, std::move(tensor));
     }
 
     (void)input_names;
@@ -379,89 +576,6 @@ Ort::MemoryInfo memory_info_for_resource(RuntimeResource resource) {
         "A concrete CPU/CUDA resource is required for tensor placement");
 }
 
-void check_cuda(cudaError_t status, const char* operation);
-
-struct OwnedCudaBuffer {
-    void* data = nullptr;
-    std::size_t bytes = 0;
-
-    OwnedCudaBuffer() = default;
-
-    explicit OwnedCudaBuffer(std::size_t size) : bytes(size) {
-        if (bytes != 0) {
-            check_cuda(cudaMalloc(&data, bytes), "cudaMalloc");
-        }
-    }
-
-    ~OwnedCudaBuffer() {
-        if (data != nullptr) {
-            cudaFree(data);
-        }
-    }
-
-    OwnedCudaBuffer(const OwnedCudaBuffer&) = delete;
-    OwnedCudaBuffer& operator=(const OwnedCudaBuffer&) = delete;
-
-    OwnedCudaBuffer(OwnedCudaBuffer&& other) noexcept
-        : data(other.data), bytes(other.bytes) {
-        other.data = nullptr;
-        other.bytes = 0;
-    }
-
-    OwnedCudaBuffer& operator=(OwnedCudaBuffer&& other) noexcept {
-        if (this != &other) {
-            if (data != nullptr) cudaFree(data);
-            data = other.data;
-            bytes = other.bytes;
-            other.data = nullptr;
-            other.bytes = 0;
-        }
-        return *this;
-    }
-};
-
-// Ort::Value must be destroyed before the external CUDA allocation.
-// Members are destroyed in reverse declaration order.
-struct TransferredTensor {
-    OwnedCudaBuffer buffer;
-    Ort::Value value{nullptr};
-};
-
-std::size_t element_size(ONNXTensorElementDataType type) {
-    switch (type) {
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT: return sizeof(float);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8: return sizeof(std::uint8_t);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8: return sizeof(std::int8_t);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16: return sizeof(std::uint16_t);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16: return sizeof(std::int16_t);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32: return sizeof(std::int32_t);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: return sizeof(std::int64_t);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING: break;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL: return sizeof(bool);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16: return 2;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE: return sizeof(double);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32: return sizeof(std::uint32_t);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64: return sizeof(std::uint64_t);
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX64: return 8;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX128: return 16;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16: return 2;
-        default: break;
-    }
-    throw std::runtime_error(
-        "Unsupported tensor element type for explicit CPU/CUDA transfer: " +
-        std::to_string(static_cast<int>(type)));
-}
-
-std::size_t tensor_byte_count(const Ort::Value& value) {
-    const auto info = value.GetTensorTypeAndShapeInfo();
-    const auto count = info.GetElementCount();
-    const auto size = element_size(info.GetElementType());
-    if (count != 0 && size > std::numeric_limits<std::size_t>::max() / count) {
-        throw std::runtime_error("Tensor byte size overflows size_t");
-    }
-    return count * size;
-}
-
 void check_cuda(cudaError_t status, const char* operation) {
     if (status != cudaSuccess) {
         throw std::runtime_error(
@@ -469,81 +583,15 @@ void check_cuda(cudaError_t status, const char* operation) {
     }
 }
 
-double transfer_tensor(
-    const Ort::Value& source,
-    RuntimeResource destination_resource,
-    Ort::AllocatorWithDefaultOptions& cpu_allocator,
-    TransferredTensor& destination) {
-
-    const auto start = std::chrono::steady_clock::now();
-
-    const auto source_resource = tensor_resource(source);
-
-    if (source_resource == destination_resource) {
-        throw std::invalid_argument(
-            "transfer_tensor called without a resource change");
-    }
-
-    const auto type_info = source.GetTensorTypeAndShapeInfo();
-    const auto shape = concrete_shape(type_info.GetShape());
-    const auto type = type_info.GetElementType();
-    const auto bytes = tensor_byte_count(source);
-
-    if (destination_resource == RuntimeResource::CUDA) {
-        destination.buffer = OwnedCudaBuffer(bytes);
-
-        const auto memory_info =
-            memory_info_for_resource(RuntimeResource::CUDA);
-
-        destination.value = Ort::Value::CreateTensor(
-            memory_info,
-            destination.buffer.data,
-            bytes,
-            shape.data(),
-            shape.size(),
-            type);
-
-        check_cuda(
-            cudaMemcpy(
-                destination.buffer.data,
-                source.GetTensorRawData(),
-                bytes,
-                cudaMemcpyHostToDevice),
-            "cudaMemcpyHostToDevice");
-    } else if (destination_resource == RuntimeResource::CPU) {
-        destination.value = Ort::Value::CreateTensor(
-            cpu_allocator,
-            shape.data(),
-            shape.size(),
-            type);
-
-        check_cuda(
-            cudaMemcpy(
-                destination.value.GetTensorMutableRawData(),
-                source.GetTensorRawData(),
-                bytes,
-                cudaMemcpyDeviceToHost),
-            "cudaMemcpyDeviceToHost");
-    } else {
-        throw std::invalid_argument(
-            "A concrete CPU/CUDA destination resource is required");
-    }
-
-    const auto end = std::chrono::steady_clock::now();
-
-    return std::chrono::duration<double, std::milli>(
-        end - start).count();
-}
-
 void execute_segment(
     SegmentRuntime& segment,
     RuntimeResource requested_resource,
-    std::unordered_map<std::string, Ort::Value>& tensor_store,
+    std::unordered_map<std::string, RuntimeTensor>& tensor_store,
+    BufferArena& arena,
     Ort::AllocatorWithDefaultOptions& allocator) {
 
     const auto resource = choose_resource(segment, requested_resource);
     auto* prepared = find_session(segment, resource);
-    
     if (!prepared || !prepared->session) {
         throw std::runtime_error(
             "Prepared session missing for " + std::string(resource_name(resource)) +
@@ -556,12 +604,14 @@ void execute_segment(
 
     std::vector<std::string> input_name_storage;
     input_name_storage.reserve(input_count);
+    std::vector<std::string> output_name_storage;
+    output_name_storage.reserve(output_count);
     double boundary_copy_ms = 0.0;
 
-    // The transferred tensors must outlive IoBinding because bindings may
-    // retain references to the externally-backed Ort::Value objects.
-    std::vector<TransferredTensor> transferred_inputs;
+    std::vector<std::shared_ptr<BufferLease>> transferred_inputs;
     transferred_inputs.reserve(input_count);
+    std::vector<std::shared_ptr<BufferLease>> output_leases;
+    output_leases.reserve(output_count);
     Ort::IoBinding io_binding(session);
 
     for (std::size_t i = 0; i < input_count; ++i) {
@@ -573,34 +623,56 @@ void execute_segment(
         if (it == tensor_store.end()) {
             throw std::runtime_error(
                 "Missing tensor required by segment " +
-                std::to_string(segment.manifest.id) + ": " +
-                input_name);
+                std::to_string(segment.manifest.id) + ": " + input_name);
         }
 
-        const auto source_resource = tensor_resource(it->second);
-
+        const auto source_resource = tensor_resource(it->second.value);
         if (source_resource == resource) {
-            io_binding.BindInput(
-                input_name.c_str(),
-                it->second);
-
+            io_binding.BindInput(input_name.c_str(), it->second.value);
         } else {
-            transferred_inputs.emplace_back();
-            boundary_copy_ms += transfer_tensor(
-                it->second,
-                resource,
-                allocator,
-                transferred_inputs.back());
+            const auto type_info = it->second.value.GetTensorTypeAndShapeInfo();
+            const auto shape = concrete_shape(type_info.GetShape());
+            const auto type = type_info.GetElementType();
+            auto lease = arena.acquire(buffer_key(resource, shape, type));
+            const auto bytes = lease->block->bytes;
 
-            io_binding.BindInput(
-                input_name.c_str(),
-                transferred_inputs.back().value);
+            auto transferred = RuntimeTensor{};
+            transferred.lease = lease;
+            const auto memory_info = memory_info_for_resource(resource);
+            transferred.value = Ort::Value::CreateTensor(
+                memory_info,
+                lease->block->data,
+                bytes,
+                shape.data(),
+                shape.size(),
+                type);
 
+            const auto start = std::chrono::steady_clock::now();
+            if (resource == RuntimeResource::CUDA) {
+                check_cuda(
+                    cudaMemcpy(
+                        lease->block->data,
+                        it->second.value.GetTensorRawData(),
+                        bytes,
+                        cudaMemcpyHostToDevice),
+                    "cudaMemcpyHostToDevice");
+            } else {
+                check_cuda(
+                    cudaMemcpy(
+                        lease->block->data,
+                        it->second.value.GetTensorRawData(),
+                        bytes,
+                        cudaMemcpyDeviceToHost),
+                    "cudaMemcpyDeviceToHost");
+            }
+            const auto end = std::chrono::steady_clock::now();
+            boundary_copy_ms += std::chrono::duration<double, std::milli>(
+                end - start).count();
+
+            io_binding.BindInput(input_name.c_str(), transferred.value);
+            transferred_inputs.push_back(std::move(lease));
         }
     }
-
-    std::vector<std::string> output_name_storage;
-    output_name_storage.reserve(output_count);
 
     for (std::size_t i = 0; i < output_count; ++i) {
         auto name = session.GetOutputNameAllocated(i, allocator);
@@ -609,45 +681,94 @@ void execute_segment(
 
     const auto memory_info = memory_info_for_resource(resource);
 
-    for (const auto& name : output_name_storage) {
-        io_binding.BindOutput(
-            name.c_str(),
-            memory_info);
+    for (std::size_t i = 0; i < output_count; ++i) {
+        auto type_info = session.GetOutputTypeInfo(i);
+        const auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+        const auto raw_shape = tensor_info.GetShape();
+        bool concrete = true;
+        for (const auto dim : raw_shape) {
+            if (dim < 0) {
+                concrete = false;
+                break;
+            }
+        }
+
+        if (!concrete) {
+            // The arena requires a known allocation size. Preserve the existing
+            // ORT allocation path for genuinely dynamic segment outputs.
+            io_binding.BindOutput(output_name_storage[i].c_str(), memory_info);
+            output_leases.push_back(nullptr);
+            continue;
+        }
+
+        const auto shape = concrete_shape(raw_shape);
+        const auto type = tensor_info.GetElementType();
+        auto lease = arena.acquire(buffer_key(resource, shape, type));
+        const auto bytes = lease->block->bytes;
+        Ort::Value output = Ort::Value::CreateTensor(
+            memory_info,
+            lease->block->data,
+            bytes,
+            shape.data(),
+            shape.size(),
+            type);
+        io_binding.BindOutput(output_name_storage[i].c_str(), output);
+        // BindOutput does not take ownership of our C++ wrapper. Keep the
+        // wrapper alive through a temporary store below, and keep its backing
+        // allocation alive in output_leases until GetOutputValues completes.
+        output_leases.push_back(std::move(lease));
     }
 
     const auto start = std::chrono::steady_clock::now();
-
-    session.Run(
-        Ort::RunOptions{nullptr},
-        io_binding);
-
+    session.Run(Ort::RunOptions{nullptr}, io_binding);
     io_binding.SynchronizeOutputs();
-
     const auto end = std::chrono::steady_clock::now();
+
     const double elapsed_ms =
         std::chrono::duration<double, std::milli>(end - start).count();
 
     auto outputs = io_binding.GetOutputValues();
-
     if (outputs.size() != output_name_storage.size()) {
         throw std::runtime_error(
             "Segment " + std::to_string(segment.manifest.id) +
             " returned an unexpected number of outputs");
     }
 
+    // If outputs were externally bound, the returned Ort::Value wrappers point
+    // at the arena allocation. Move both the wrapper and its lease into the
+    // tensor store so the allocation survives until tensor liveness expires.
     for (std::size_t i = 0; i < outputs.size(); ++i) {
+        RuntimeTensor tensor;
+        tensor.lease = std::move(output_leases[i]);
+        tensor.value = std::move(outputs[i]);
 
-        tensor_store.insert_or_assign(
-            output_name_storage[i],
-            std::move(outputs[i]));
+        auto existing = tensor_store.find(output_name_storage[i]);
+        if (existing != tensor_store.end()) {
+            existing->second.value = Ort::Value{nullptr};
+            existing->second.lease.reset();
+            existing->second = std::move(tensor);
+        } else {
+            tensor_store.emplace(output_name_storage[i], std::move(tensor));
+        }
+    }
 
+    io_binding.ClearBoundOutputs();
+    io_binding.ClearBoundInputs();
+
+    if (resource == RuntimeResource::CUDA) {
+        check_cuda(
+            cudaDeviceSynchronize(),
+            "cudaDeviceSynchronize before releasing transferred inputs");
     }
 
     std::cout << "    segment " << segment.manifest.id
-            << " [" << resource_name(resource) << "] "
-            << elapsed_ms << " ms"
-            << " | boundary_copy=" << boundary_copy_ms << " ms\n";
-
+              << " [" << resource_name(resource) << "] "
+              << elapsed_ms << " ms"
+              << " | boundary_copy=" << boundary_copy_ms << " ms"
+              << " | arena_allocations=" << arena.allocation_count()
+              << " | arena_reuses=" << arena.reuse_count()
+              << " | arena_bytes=" << arena.allocated_bytes()
+              << " | arena_peak_live_bytes=" << arena.peak_live_bytes() << "\n";
 }
 
 }  // namespace
@@ -739,12 +860,26 @@ void FlexOnRuntime::run(const RunOptions& options) {
             "resource plan length must match the selected level segment count");
     }
 
+    std::unordered_map<std::string, std::size_t> future_uses;
+    for (const auto& segment : level) {
+        for (const auto& input_name : segment.manifest.input_names) {
+            ++future_uses[input_name];
+        }
+    }
+
+    std::unordered_set<std::string> final_outputs(
+        level.back().manifest.output_names.begin(),
+        level.back().manifest.output_names.end());
+
     // The first segment/session defines the model's external input tensors.
-    // These are regenerated for each inference iteration; all intermediate
-    // tensors are retained in the tensor store until consumed by later
-    // segments, which also handles non-adjacent graph dependencies.
+    // The arena persists across iterations so released buffers can be reused
+    // by subsequent inferences without another device allocation.
+    const auto future_uses_template = future_uses;
+    BufferArena arena;
+
     for (std::uint32_t iteration = 0; iteration < options.iterations; ++iteration) {
-        std::unordered_map<std::string, Ort::Value> tensor_store;
+        auto future_uses = future_uses_template;
+        std::unordered_map<std::string, RuntimeTensor> tensor_store;
 
         auto first_resource = choose_resource(level.front(), options.resource);
         auto* first_prepared = find_session(level.front(), first_resource);
@@ -774,10 +909,24 @@ void FlexOnRuntime::run(const RunOptions& options) {
                 segment,
                 requested_resource,
                 tensor_store,
+                arena,
                 impl_->state->allocator);
+
+            // Release tensors whose final consumer has just completed. This
+            // returns their arena allocations to the free pool for reuse.
+            for (const auto& input_name : segment.manifest.input_names) {
+                auto remaining = future_uses.find(input_name);
+                if (remaining != future_uses.end() && remaining->second > 0) {
+                    --remaining->second;
+                    if (remaining->second == 0 &&
+                        final_outputs.find(input_name) == final_outputs.end()) {
+                        tensor_store.erase(input_name);
+                    }
+                }
+            }
         }
 
-            for (const auto& output_name : level.back().manifest.output_names) {
+        for (const auto& output_name : level.back().manifest.output_names) {
             if (tensor_store.find(output_name) == tensor_store.end()) {
                 throw std::runtime_error(
                     "Final level output tensor was not produced: " + output_name);

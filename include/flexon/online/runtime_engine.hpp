@@ -28,11 +28,12 @@ struct RunOptions {
 /**
  * Online runtime for executing a frozen offline artifact.
  *
- * Milestone 1/2 runtime for executing a frozen offline artifact.
+ * Milestone 1/2/3 runtime for executing a frozen offline artifact.
  * All supported segment/resource session variants are prepared by load().
  * Segment execution uses I/O binding and explicit CPU/CUDA tensor placement;
  * cross-resource boundary copies are measured separately from compute time.
- * Adaptive scheduling is introduced in later milestones.
+ * Segment-boundary buffers are reused by the Milestone-3 activation arena
+ * when tensor shape, type, resource, and lifetime permit.
  */
 class FlexOnRuntime {
 public:
