@@ -44,7 +44,14 @@ The offline compiler is implemented through artifact generation:
 - YAML offline artifact manifest generation
 - artifact validation
 
-The online scheduler/runtime remains under construction.
+The online runtime currently includes:
+- preloaded CPU/CUDA segment sessions;
+- explicit CPU↔CUDA boundary transfers;
+- reusable CPU/CUDA segment-boundary buffer arenas;
+- FlexOn AD/MI segmentation-level selection;
+- degradation-aware dynamic resource selection with background resource monitoring.
+
+Recovery allocation is the next online milestone.
 
 The CUDA profiling path uses an ORT CUDA-enabled session, but this version does
 not claim that successful session creation proves every node was assigned to

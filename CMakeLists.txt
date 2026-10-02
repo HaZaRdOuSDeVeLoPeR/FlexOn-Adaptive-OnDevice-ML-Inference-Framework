@@ -321,6 +321,7 @@ add_library(
     STATIC
 
     src/online/runtime_engine.cpp
+    src/online/scheduler.cpp
 )
 
 target_include_directories(
@@ -486,6 +487,22 @@ if(FLEXON_BUILD_TESTS)
     add_test(
         NAME flexon_segment_model_generator_test
         COMMAND flexon_segment_model_generator_test
+    )
+
+    add_executable(
+        flexon_scheduler_test
+        tests/online/scheduler_test.cpp
+    )
+
+    target_link_libraries(
+        flexon_scheduler_test
+        PRIVATE
+            flexon_online_lib
+    )
+
+    add_test(
+        NAME flexon_scheduler_test
+        COMMAND flexon_scheduler_test
     )
 
     # ------------------------------------------------------------------------

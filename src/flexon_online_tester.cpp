@@ -10,7 +10,7 @@ namespace {
 void usage(const char* program) {
     std::cout << "Usage: " << program
               << " --artifact <dir> [--level N] [--resource cpu|cuda|auto]"
-                 " [--iterations N] [--resource-plan cpu,cuda,...]\n";
+                 " [--iterations N] [--resource-plan cpu,cuda,...] [--adaptive-level] [--scheduler-config path]\n";
 }
 
 std::vector<flexon::online::RuntimeResource> resource_plan_from_string(
@@ -23,8 +23,8 @@ std::vector<flexon::online::RuntimeResource> resource_plan_from_string(
             start, comma == std::string::npos ? std::string::npos : comma - start);
         if (token == "cpu") plan.push_back(flexon::online::RuntimeResource::CPU);
         else if (token == "cuda") plan.push_back(flexon::online::RuntimeResource::CUDA);
-        else if (token == "auto") plan.push_back(flexon::online::RuntimeResource::Auto);
-        else throw std::invalid_argument("Unknown resource in plan: " + token);
+        else throw std::invalid_argument(
+            "resource-plan entries must be cpu or cuda: " + token);
         if (comma == std::string::npos) break;
         start = comma + 1;
     }
@@ -61,6 +61,8 @@ int main(int argc, char** argv) {
             } else if (arg == "--resource-plan" && i + 1 < argc) {
                 options.resource_plan =
                     resource_plan_from_string(argv[++i]);
+            } else if (arg == "--adaptive-level") {
+                options.adaptive_level = true;
             } else if (arg == "--help" || arg == "-h") {
                 usage(argv[0]);
                 return 0;
@@ -73,6 +75,11 @@ int main(int argc, char** argv) {
         if (artifact.empty()) {
             usage(argv[0]);
             return 2;
+        }
+
+        if (options.adaptive_level && !options.resource_plan.empty()) {
+            throw std::invalid_argument(
+                "--adaptive-level cannot be combined with a fixed resource plan");
         }
 
         flexon::online::FlexOnRuntime runtime;

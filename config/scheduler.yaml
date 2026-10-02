@@ -4,10 +4,8 @@ level_selection:
 
 resource_selection:
   remaining_capacity_floor: 0.05
+  sample_interval_ms: 50
 
 recovery:
   enabled: true
   gamma: 1.3
-
-runtime:
-  inference_periods: 100

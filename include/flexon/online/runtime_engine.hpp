@@ -23,17 +23,25 @@ struct RunOptions {
     // Optional per-segment execution plan. When non-empty, its size must
     // match the selected level segment count.
     std::vector<RuntimeResource> resource_plan;
+    // Enable FlexOn's AD/MI segmentation-level selection across inference
+    // periods. The supplied level is used as the initial level.
+    bool adaptive_level{false};
+    // Optional scheduler configuration. An empty path uses
+    // config/scheduler.yaml when present, otherwise paper defaults.
+    std::filesystem::path scheduler_config_path;
 };
 
 /**
  * Online runtime for executing a frozen offline artifact.
  *
- * Milestone 1/2/3 runtime for executing a frozen offline artifact.
+ * Milestone 1/2/3/4 runtime for executing a frozen offline artifact.
  * All supported segment/resource session variants are prepared by load().
  * Segment execution uses I/O binding and explicit CPU/CUDA tensor placement;
  * cross-resource boundary copies are measured separately from compute time.
  * Segment-boundary buffers are reused by the Milestone-3 activation arena
  * when tensor shape, type, resource, and lifetime permit.
+ * Milestone 4 adds the paper's AD/MI level selection and degradation-aware
+ * per-segment resource selection when RuntimeResource::Auto is requested.
  */
 class FlexOnRuntime {
 public:
