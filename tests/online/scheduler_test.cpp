@@ -2,6 +2,8 @@
 
 #include <cassert>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 
 int main() {
     flexon::online::scheduler::SchedulerConfig config;
@@ -79,6 +81,24 @@ int main() {
     assert(std::isfinite(recovery.score));
     assert(!scheduler.should_trigger_recovery(2.5, recovery.score));
     assert(scheduler.should_trigger_recovery(2.6 + 1.0e-6, recovery.score));
+
+    // resource_monitor.sample_interval_ms is the scheduler/resource-monitor
+    // setting. The old resource_selection key remains only as a compatibility
+    // fallback.
+    const auto config_path =
+        std::filesystem::temp_directory_path() / "flexon_scheduler_test.yaml";
+    {
+        std::ofstream config_file(config_path);
+        config_file << "resource_monitor:\n"
+                    << "  sample_interval_ms: 25\n"
+                    << "resource_selection:\n"
+                    << "  sample_interval_ms: 75\n";
+    }
+
+    const auto loaded =
+        flexon::online::scheduler::OnlineScheduler::load_config(config_path);
+    assert(loaded.resource_sample_interval_ms == 25);
+    std::filesystem::remove(config_path);
 
     return 0;
 }

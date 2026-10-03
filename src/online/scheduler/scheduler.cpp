@@ -62,12 +62,11 @@ SchedulerConfig OnlineScheduler::load_config(
         if (node["enabled"]) config.recovery_enabled = node["enabled"].as<bool>();
     }
 
-    // experiments.yaml owns the monitoring sampling interval. Keep the
-    // scheduler self-contained if that file is absent.
-    if (root["resource_selection"] &&
-        root["resource_selection"]["sample_interval_ms"]) {
+    // scheduler.yaml owns the resource-monitor sampling interval.
+    if (root["resource_monitor"] &&
+        root["resource_monitor"]["sample_interval_ms"]) {
         config.resource_sample_interval_ms =
-            root["resource_selection"]["sample_interval_ms"].as<std::uint32_t>();
+            root["resource_monitor"]["sample_interval_ms"].as<std::uint32_t>();
     }
 
     config.alpha = std::max(0.0, config.alpha);

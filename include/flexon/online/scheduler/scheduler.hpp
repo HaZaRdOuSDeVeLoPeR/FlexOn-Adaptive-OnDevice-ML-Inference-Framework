@@ -18,6 +18,7 @@ struct SchedulerConfig {
     double beta{1.6};
     double gamma{1.3};
     bool recovery_enabled{true};
+    // Resource-monitor sampling interval in milliseconds.
     std::uint32_t resource_sample_interval_ms{50};
 };
 

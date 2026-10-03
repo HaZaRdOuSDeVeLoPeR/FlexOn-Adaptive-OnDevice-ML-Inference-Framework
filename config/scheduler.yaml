@@ -2,7 +2,7 @@ level_selection:
   alpha: 1.2
   beta: 1.6
 
-resource_selection:
+resource_monitor:
   sample_interval_ms: 50
 
 recovery:
