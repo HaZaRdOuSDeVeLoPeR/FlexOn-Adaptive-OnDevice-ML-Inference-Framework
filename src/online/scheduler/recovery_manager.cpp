@@ -152,7 +152,9 @@ executor::SegmentExecutionStats execute_segment_with_recovery(
                 executor::commit_segment_outputs(result, tensor_store);
                 helper::print_segment_stats(
                     segment.manifest, result.stats, arena);
-                std::cout << "[recovery] primary result won\n";
+                std::cout
+                    << "[recovery] elapsed_ms=" << result.stats.elapsed_ms
+                    << " | primary won\n";
                 return result.stats;
             }
 
@@ -202,7 +204,9 @@ executor::SegmentExecutionStats execute_segment_with_recovery(
                             *recovery_result, tensor_store);
                         helper::print_segment_stats(
                             segment.manifest, recovery_result->stats, arena);
-                        std::cout << "[recovery] alternative result won\n";
+                        std::cout
+                            << "[recovery] elapsed_ms=" << recovery_result->stats.elapsed_ms
+                            << " alternative won\n";
                         return recovery_result->stats;
                     }
 
@@ -213,7 +217,9 @@ executor::SegmentExecutionStats execute_segment_with_recovery(
                         *primary_result, tensor_store);
                     helper::print_segment_stats(
                         segment.manifest, primary_result->stats, arena);
-                    std::cout << "[recovery] primary result won\n";
+                    std::cout
+                        << "[recovery] elapsed_ms=" << primary_result->stats.elapsed_ms
+                        << " primary won\n";
                     return primary_result->stats;
                 }
 
@@ -225,7 +231,9 @@ executor::SegmentExecutionStats execute_segment_with_recovery(
                         *recovery_result, tensor_store);
                     helper::print_segment_stats(
                         segment.manifest, recovery_result->stats, arena);
-                    std::cout << "[recovery] alternative result won\n";
+                    std::cout
+                        << "[recovery] elapsed_ms=" << recovery_result->stats.elapsed_ms
+                        << " alternative won\n";
                     return recovery_result->stats;
                 }
 
@@ -237,7 +245,9 @@ executor::SegmentExecutionStats execute_segment_with_recovery(
                         *primary_result, tensor_store);
                     helper::print_segment_stats(
                         segment.manifest, primary_result->stats, arena);
-                    std::cout << "[recovery] primary result won\n";
+                    std::cout
+                        << "[recovery] elapsed_ms=" << primary_result->stats.elapsed_ms
+                        << " primary won\n";
                     return primary_result->stats;
                 }
 
@@ -255,7 +265,9 @@ executor::SegmentExecutionStats execute_segment_with_recovery(
                     executor::commit_segment_outputs(result, tensor_store);
                     helper::print_segment_stats(
                         segment.manifest, result.stats, arena);
-                    std::cout << "[recovery] alternative result won\n";
+                    std::cout
+                        << "[recovery] elapsed_ms=" << result.stats.elapsed_ms
+                        << " | alternative won\n";
                     return result.stats;
                 } catch (...) {
                     // A speculative recovery failure must not invalidate a
@@ -272,7 +284,9 @@ executor::SegmentExecutionStats execute_segment_with_recovery(
             }
             executor::commit_segment_outputs(result, tensor_store);
             helper::print_segment_stats(segment.manifest, result.stats, arena);
-            std::cout << "[recovery] primary result won\n";
+            std::cout
+                << "[recovery] elapsed_ms=" << result.stats.elapsed_ms
+                << " | primary won\n";
             return result.stats;
         }
 

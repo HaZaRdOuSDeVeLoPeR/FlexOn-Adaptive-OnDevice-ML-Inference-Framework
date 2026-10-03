@@ -265,7 +265,7 @@ void FlexOnRuntime::run(const RunOptions& options) {
 
                     std::cout
                         << "[scheduler] segment " << segment.manifest.id
-                        << " alternative=" << helper::resource_name(requested_resource)
+                        << " alternative=" << helper::resource_name(decisions[1].resource)
                         << " score=" << decisions[1].score
                         << " degradation=" << decisions[1].degradation
                         << " remaining_capacity=" << decisions[1].remaining_capacity << '\n';
