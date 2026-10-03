@@ -128,12 +128,12 @@ double OnlineScheduler::remaining_capacity(
     return 1.0;
 }
 
-SchedulerDecision OnlineScheduler::select_first_resource(
+std::array<SchedulerDecision, 2> OnlineScheduler::select_first_resource(
     const SchedulerSegmentCosts& next) const {
 
-    SchedulerDecision best;
+    std::array<SchedulerDecision, 2> best;
 
-    for (const auto candidate :
+    for (auto candidate :
          {core::Resource::CPU, core::Resource::CUDA}) {
         const auto cost =
             candidate == core::Resource::CPU ? next.cpu : next.cuda;
@@ -146,13 +146,16 @@ SchedulerDecision OnlineScheduler::select_first_resource(
             1.0 / (capacity + kCapacityEpsilon);
         const double score = degradation * cost.expected_ms;
 
-        if (score < best.score) {
-            best = SchedulerDecision{
-                candidate, score, degradation, capacity};
-        }
+        best[(int)candidate] =
+            {candidate, score, degradation, capacity};
     }
 
-    if (!std::isfinite(best.score)) {
+    std::sort(best.begin(), best.end(), 
+    [](const SchedulerDecision &a, const SchedulerDecision &b){
+        return a.score < b.score;
+    });
+
+    if (!std::isfinite(best[0].score)) {
         throw std::runtime_error(
             "No supported resource is available for the next segment");
     }
@@ -160,20 +163,19 @@ SchedulerDecision OnlineScheduler::select_first_resource(
     return best;
 }
 
-SchedulerDecision OnlineScheduler::select_next_resource(
+std::array<SchedulerDecision, 2> OnlineScheduler::select_next_resource(
     const SchedulerSegmentCosts& current,
     core::Resource current_resource,
     double current_measured_ms,
     const SchedulerSegmentCosts& next) const {
 
-    SchedulerDecision best;
+    std::array<SchedulerDecision, 2> best;
 
     double current_expected = std::numeric_limits<double>::infinity();
-    if (current_resource == core::Resource::CPU) {
+    if (current_resource == core::Resource::CPU)
         current_expected = current.cpu.expected_ms;
-    } else if (current_resource == core::Resource::CUDA) {
+    else if (current_resource == core::Resource::CUDA)
         current_expected = current.cuda.expected_ms;
-    }
 
     const double current_degradation =
         (std::isfinite(current_expected) && current_expected > 0.0 &&
@@ -202,13 +204,16 @@ SchedulerDecision OnlineScheduler::select_next_resource(
         }
 
         const double score = degradation * cost.expected_ms;
-        if (score < best.score) {
-            best = SchedulerDecision{
-                candidate, score, degradation, capacity};
-        }
+        best[(int)candidate] =
+            {candidate, score, degradation, capacity};
     }
 
-    if (!std::isfinite(best.score)) {
+    std::sort(best.begin(), best.end(), 
+    [](const SchedulerDecision &a, const SchedulerDecision &b){
+        return a.score < b.score;
+    });
+
+    if (!std::isfinite(best[0].score)) {
         throw std::runtime_error(
             "No supported resource is available for the next segment");
     }

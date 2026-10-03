@@ -7,64 +7,6 @@
 #include <stdexcept>
 #include <string>
 
-namespace {
-
-void usage(const char* program) {
-    std::cout
-        << "Usage:\n"
-        << "  " << program << " [--all | --model <model.onnx>]\n"
-        << "  " << program << " --validate [--artifact <directory> | --all]\n\n"
-        << "Options:\n"
-        << "  --all             Process every model in models.yaml.\n"
-        << "                    Default when no generation selector is given.\n"
-        << "  --model           Process one ONNX model.\n"
-        << "  --validate        Validate existing artifacts only; never generate.\n"
-        << "  --artifact        Explicit artifact directory for --model, or the\n"
-        << "                    artifact to validate with --validate.\n"
-        << "  --artifact-root   Root directory for generated/validated artifacts.\n"
-        << "                    Default: artifacts\n"
-        << "  --config          Offline profiling configuration.\n"
-        << "                    Default: config/offline.yaml\n"
-        << "  --models-config   Model catalog/runtime configuration.\n"
-        << "                    Default: config/models.yaml\n"
-        << "  --help, -h        Show this help message.\n";
-}
-
-bool artifact_is_valid(const std::filesystem::path& artifact_directory) {
-    if (!std::filesystem::exists(artifact_directory) ||
-        !std::filesystem::is_directory(artifact_directory)) {
-        return false;
-    }
-    return flexon::offline::cli::validate_artifact(artifact_directory);
-}
-
-void generate_model(
-    const std::filesystem::path& model_path,
-    const std::filesystem::path& artifact_directory,
-    const std::filesystem::path& config_path,
-    const std::filesystem::path& models_config_path) {
-
-    std::cout
-        << "\n[offline] ========================================\n"
-        << "[offline] model: " << model_path << '\n'
-        << "[offline] artifact: " << artifact_directory << '\n'
-        << "[offline] ========================================\n";
-
-    if (artifact_is_valid(artifact_directory)) {
-        std::cout << "[offline] artifact already exists and is valid; skipping\n";
-        return;
-    }
-
-    flexon::offline::OfflineEngine engine(config_path, models_config_path);
-    engine.run(model_path, artifact_directory);
-
-    // Every fresh generation is validated before the process reports success.
-    flexon::offline::cli::validate_artifact_or_throw(artifact_directory);
-    std::cout << "[offline] generated artifact validated successfully\n";
-}
-
-}  // namespace
-
 int main(int argc, char** argv) {
     std::filesystem::path model;
     std::filesystem::path artifact;
@@ -80,7 +22,7 @@ int main(int argc, char** argv) {
             const std::string arg = argv[i];
 
             if (arg == "--help" || arg == "-h") {
-                usage(argv[0]);
+                flexon::offline::cli::usage(argv[0]);
                 return 0;
             }
 
@@ -162,7 +104,7 @@ int main(int argc, char** argv) {
                 artifact_directory = artifact_root / model.stem().string();
             }
 
-            generate_model(
+            flexon::offline::cli::generate_model(
                 model,
                 artifact_directory,
                 config,
@@ -181,14 +123,14 @@ int main(int argc, char** argv) {
             const auto artifact_directory = artifact_root / model_spec.name;
 
             try {
-                if (artifact_is_valid(artifact_directory)) {
+                if (flexon::offline::cli::artifact_is_valid(artifact_directory)) {
                     std::cout << "\n[offline] " << model_spec.name
                               << ": valid artifact exists; skipping\n";
                     ++skipped;
                     continue;
                 }
 
-                generate_model(
+                flexon::offline::cli::generate_model(
                     model_spec.path,
                     artifact_directory,
                     config,

@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 
 #include <flexon/core/types.hpp>
 #include <flexon/online/artifact/manifest_loader.hpp>
@@ -33,7 +34,7 @@ struct SchedulerSegmentCosts {
 };
 
 struct SchedulerDecision {
-    core::Resource resource{core::Resource::CPU};
+    core::Resource resource;
     double score{std::numeric_limits<double>::infinity()};
     double degradation{1.0};
     double remaining_capacity{1.0};
@@ -55,10 +56,10 @@ public:
     void start();
     void stop();
 
-    SchedulerDecision select_first_resource(
+    std::array<SchedulerDecision, 2> select_first_resource(
         const SchedulerSegmentCosts& next) const;
 
-    SchedulerDecision select_next_resource(
+    std::array<SchedulerDecision, 2> select_next_resource(
         const SchedulerSegmentCosts& current,
         core::Resource current_resource,
         double current_measured_ms,

@@ -71,12 +71,12 @@ int main() {
     costs.cpu = {true, 10.0};
     costs.cuda = {true, 2.0};
 
-    const auto first = scheduler.select_first_resource(costs);
+    const auto first = scheduler.select_first_resource(costs)[0];
     assert(first.resource == flexon::core::Resource::CUDA);
     assert(std::isfinite(first.score));
 
     const auto next = scheduler.select_next_resource(
-        costs, flexon::core::Resource::CPU, 30.0, costs);
+        costs, flexon::core::Resource::CPU, 30.0, costs)[0];
     assert(next.resource == flexon::core::Resource::CUDA);
     assert(next.score > 0.0);
     assert(std::isfinite(next.score));

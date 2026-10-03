@@ -1,3 +1,4 @@
+#include "flexon/core/types.hpp"
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -186,24 +187,36 @@ void FlexOnRuntime::run(const RunOptions& options) {
             executor::SegmentExecutionStats previous_stats{};
             manifest::SegmentManifest* previous_manifest = nullptr;
 
+            std::cout 
+                << "[online] iteration " << (iteration + 1)
+                << "/" << options.iterations
+                << " level=" << current_level << '\n';
+
             // The first segment establishes the initial resource. In Auto
             // mode this uses predicted cost divided by current remaining
             // capacity, corresponding to the resource-selection policy.
             core::Resource first_resource = options.resource;
-            scheduler::SchedulerDecision first_decision{};
-
+            
             if (dynamic_resource_selection) {
-                first_decision = scheduler.select_first_resource(
+                std::array<scheduler::SchedulerDecision, 2> decisions;
+
+                decisions = scheduler.select_first_resource(
                     scheduler::scheduler_costs(level.front().manifest));
-                first_resource = first_decision.resource;
+                first_resource = decisions[0].resource;
 
                 std::cout
-                    << "[scheduler] iteration " << (iteration + 1)
-                    << " initial resource=" << helper::resource_name(first_resource)
-                    << " score=" << first_decision.score
-                    << " degradation=" << first_decision.degradation
-                    << " remaining_capacity="
-                    << first_decision.remaining_capacity << '\n';
+                    << "[scheduler] segment 0"
+                    << " selected=" << helper::resource_name(first_resource)
+                    << " score=" << decisions[0].score
+                    << " degradation=" << decisions[0].degradation
+                    << " remaining_capacity=" << decisions[0].remaining_capacity << '\n';
+                
+                std::cout
+                    << "[scheduler] segment 0" 
+                    << " alternative=" << helper::resource_name(decisions[1].resource)
+                    << " score=" << decisions[1].score
+                    << " degradation=" << decisions[1].degradation
+                    << " remaining_capacity=" << decisions[1].remaining_capacity << '\n';
             }
 
             auto* first_prepared =
@@ -219,40 +232,43 @@ void FlexOnRuntime::run(const RunOptions& options) {
                 *first_prepared->session,
                 impl_->state->allocator);
 
-            std::cout << "[online] iteration " << (iteration + 1)
-                      << "/" << options.iterations
-                      << " level=" << current_level << '\n';
-
             for (std::size_t segment_index = 0;
                  segment_index < level.size();
                  ++segment_index) {
 
                 auto& segment = level[segment_index];
-
                 core::Resource requested_resource = options.resource;
 
                 if (!options.resource_plan.empty()) {
                     requested_resource =
                         options.resource_plan[segment_index];
-                } else if (dynamic_resource_selection &&
+                }
+                else if (dynamic_resource_selection &&
                            segment_index == 0) {
                     requested_resource = first_resource;
-                } else if (dynamic_resource_selection) {
-                    const auto decision = scheduler.select_next_resource(
+                }
+                else if (dynamic_resource_selection) {
+                    const auto decisions = scheduler.select_next_resource(
                         scheduler::scheduler_costs(*previous_manifest),
                         previous_resource,
                         previous_stats.elapsed_ms,
                         scheduler::scheduler_costs(segment.manifest));
 
-                    requested_resource = decision.resource;
+                    requested_resource = decisions[0].resource;
 
                     std::cout
                         << "[scheduler] segment " << segment.manifest.id
                         << " selected=" << helper::resource_name(requested_resource)
-                        << " score=" << decision.score
-                        << " degradation=" << decision.degradation
-                        << " remaining_capacity="
-                        << decision.remaining_capacity << '\n';
+                        << " score=" << decisions[0].score
+                        << " degradation=" << decisions[0].degradation
+                        << " remaining_capacity=" << decisions[0].remaining_capacity << '\n';
+
+                    std::cout
+                        << "[scheduler] segment " << segment.manifest.id
+                        << " alternative=" << helper::resource_name(requested_resource)
+                        << " score=" << decisions[1].score
+                        << " degradation=" << decisions[1].degradation
+                        << " remaining_capacity=" << decisions[1].remaining_capacity << '\n';
                 }
 
                 executor::SegmentExecutionStats stats;
