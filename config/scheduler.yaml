@@ -6,5 +6,4 @@ resource_monitor:
   sample_interval_ms: 50
 
 recovery:
-  enabled: true
   gamma: 1.3

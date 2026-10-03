@@ -50,16 +50,21 @@ SchedulerConfig OnlineScheduler::load_config(
 
     const auto root = YAML::LoadFile(path.string());
 
-    if (root["level_selection"]) {
-        const auto node = root["level_selection"];
-        if (node["alpha"]) config.alpha = node["alpha"].as<double>();
-        if (node["beta"]) config.beta = node["beta"].as<double>();
+    // scheduler.yaml owns the level-selection parameters.
+    if (root["alpha"]) {
+        config.alpha = root["alpha"].as<double>();
+    }
+    if (root["beta"]) {
+        config.beta = root["beta"].as<double>();
     }
 
-    if (root["recovery"]) {
-        const auto node = root["recovery"];
-        if (node["gamma"]) config.gamma = node["gamma"].as<double>();
-        if (node["enabled"]) config.recovery_enabled = node["enabled"].as<bool>();
+    // scheduler.yaml owns the recovery parameters.
+    if (root["gamma"]) {
+        config.gamma = root["gamma"].as<double>();
+    }
+    if (root["recovery"] && root["recovery"]["enabled"]) {
+        config.recovery_enabled =
+            root["recovery"]["enabled"].as<bool>();
     }
 
     // scheduler.yaml owns the resource-monitor sampling interval.

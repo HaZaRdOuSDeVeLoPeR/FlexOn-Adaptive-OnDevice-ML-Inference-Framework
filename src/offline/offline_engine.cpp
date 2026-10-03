@@ -143,6 +143,13 @@ void OfflineEngine::run(
     std::cout
         << "[offline] generated levels: "
         << levels.levels.size() << '\n';
+    
+    for (size_t i = 0; i < levels.levels.size(); i++)
+    {
+        std::cout
+            << "[offline] level " << i <<": " 
+            << levels.levels[i].size() << " segments" << '\n';
+    }
 
     artifact::ArtifactWriter::write(
         artifact_directory,

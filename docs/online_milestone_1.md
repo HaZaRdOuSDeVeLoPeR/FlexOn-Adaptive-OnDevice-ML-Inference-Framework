@@ -37,12 +37,20 @@ replaced by explicit lifetime-aware buffer management in later milestones.
 
 ## CLI
 
+The online tester was consolidated into the runtime application. The single
+experiment-facing executable is now:
+
 ```text
-./apps/flexon_online --artifact <dir> [--level N] [--resource cpu|cuda|auto] [--resource-plan cpu,cuda,...] [--iterations N]
-./apps/flexon_online_tester --artifact <dir> [--level N] [--resource cpu|cuda|auto] [--resource-plan cpu,cuda,...]
+./apps/flexon_online --artifact <dir> [options]
 ```
 
-The default resource is CPU and the default level/iteration count is 0/1.
+Its defaults are 100 iterations, initial level `max_level / 2`, automatic
+resource selection, automatic resource plan, and adaptive-level selection
+disabled. Scheduler `alpha`, `beta`, and `gamma` may be overridden from the
+command line; recovery is enabled explicitly with `--with-recovery`.
+
+The offline tester was likewise consolidated into `flexon_offline`; use
+`--validate` for validation-only runs.
 
 
 ### Execution backend note

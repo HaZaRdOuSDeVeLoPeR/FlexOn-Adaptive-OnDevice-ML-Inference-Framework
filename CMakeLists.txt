@@ -43,9 +43,14 @@ endif()
 # ONNX Runtime remains responsible for executing CUDA segment kernels.
 find_package(CUDAToolkit REQUIRED)
 
-# All executables are generated into the project apps/ directory.
+# User-facing applications are generated into the project apps/ directory.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY
     "${CMAKE_SOURCE_DIR}/apps"
+)
+
+# Test executable directory
+set(FLEXON_TEST_RUNTIME_OUTPUT_DIR
+    "${CMAKE_SOURCE_DIR}/tests"
 )
 
 # ============================================================================
@@ -293,6 +298,7 @@ add_library(
     src/offline/profiling/segment_profiler.cpp
     src/offline/artifact/artifact_writer.cpp
     src/offline/artifact/artifact_validator.cpp
+    src/offline/offline_helper.cpp
     src/offline/offline_engine.cpp
 )
 
@@ -328,6 +334,7 @@ add_library(
     src/online/resource/resource_runtime.cpp
     src/online/scheduler/recovery_manager.cpp
     src/online/scheduler/scheduler.cpp
+    src/online/runtime_helper.cpp
     src/online/runtime_engine.cpp
 )
 
@@ -352,23 +359,11 @@ target_link_libraries(
 
 if(FLEXON_BUILD_APPS)
 
-    # Final FlexOn application
-    add_executable(
-        flexon
-        src/flexon_online.cpp
-    )
-
-    target_link_libraries(
-        flexon
-        PRIVATE
-            flexon_core
-            flexon_online_lib
-    )
-
-    # Offline phase
+    # Offline phase: generation and validation are exposed through one CLI.
     add_executable(
         flexon_offline
         src/flexon_offline.cpp
+        src/offline/offline_helper.cpp
     )
 
     target_link_libraries(
@@ -378,27 +373,18 @@ if(FLEXON_BUILD_APPS)
             flexon_offline_lib
     )
 
-    # Offline tester
+    # Online phase: runtime execution and validation behavior are exposed
+    # through one experiment-friendly CLI.
     add_executable(
-        flexon_offline_tester
-        src/flexon_offline_tester.cpp
+        flexon_online
+        src/flexon_online.cpp
+        src/online/runtime_helper.cpp
     )
 
     target_link_libraries(
-        flexon_offline_tester
+        flexon_online
         PRIVATE
-            flexon_offline_lib
-    )
-
-    # Online tester
-    add_executable(
-        flexon_online_tester
-        src/flexon_online_tester.cpp
-    )
-
-    target_link_libraries(
-        flexon_online_tester
-        PRIVATE
+            flexon_core
             flexon_online_lib
     )
 
@@ -412,125 +398,103 @@ if(FLEXON_BUILD_TESTS)
 
     enable_testing()
 
+    function(flexon_add_test target source)
+        add_executable(${target} ${source})
+        set_target_properties(${target} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${FLEXON_TEST_RUNTIME_OUTPUT_DIR}"
+        )
+        add_test(NAME ${target} COMMAND ${target})
+    endfunction()
+
     # ------------------------------------------------------------------------
     # Offline tests
     # ------------------------------------------------------------------------
 
-    add_executable(
+    flexon_add_test(
         flexon_onnx_model_loader_test
-        tests/offline/onnx_model_loader_test.cpp
+        src/tests/offline/onnx_model_loader_test.cpp
     )
+    target_link_libraries(flexon_onnx_model_loader_test PRIVATE flexon_offline_lib)
 
-    target_link_libraries(
-        flexon_onnx_model_loader_test
-        PRIVATE
-            flexon_offline_lib
-    )
-
-    add_test(
-        NAME flexon_onnx_model_loader_test
-        COMMAND flexon_onnx_model_loader_test
-    )
-
-    add_executable(
+    flexon_add_test(
         flexon_graph_analyzer_test
-        tests/offline/graph_analyzer_test.cpp
+        src/tests/offline/graph_analyzer_test.cpp
     )
+    target_link_libraries(flexon_graph_analyzer_test PRIVATE flexon_offline_lib)
 
-    target_link_libraries(
-        flexon_graph_analyzer_test
-        PRIVATE
-            flexon_offline_lib
-    )
-
-    add_test(
-        NAME flexon_graph_analyzer_test
-        COMMAND flexon_graph_analyzer_test
-    )
-
-    add_executable(
+    flexon_add_test(
         flexon_segment_model_generator_test
-        tests/offline/segment_model_generator_test.cpp
+        src/tests/offline/segment_model_generator_test.cpp
     )
+    target_link_libraries(flexon_segment_model_generator_test PRIVATE flexon_offline_lib)
 
-    add_executable(
+    flexon_add_test(
         flexon_runtime_shape_resolver_test
-        tests/offline/runtime_shape_resolver_test.cpp
+        src/tests/offline/runtime_shape_resolver_test.cpp
     )
+    target_link_libraries(flexon_runtime_shape_resolver_test PRIVATE flexon_offline_lib)
 
-    target_link_libraries(
-        flexon_runtime_shape_resolver_test
-        PRIVATE
-            flexon_offline_lib
-    )
-
-    add_test(
-        NAME flexon_runtime_shape_resolver_test
-        COMMAND flexon_runtime_shape_resolver_test
-    )
-
-    add_executable(
+    flexon_add_test(
         flexon_model_config_test
-        tests/offline/model_config_test.cpp
+        src/tests/offline/model_config_test.cpp
     )
+    target_link_libraries(flexon_model_config_test PRIVATE flexon_offline_lib)
 
-    target_link_libraries(
-        flexon_model_config_test
-        PRIVATE
-            flexon_offline_lib
-    )
+    # ------------------------------------------------------------------------
+    # Online tests
+    # ------------------------------------------------------------------------
 
-    add_test(
-        NAME flexon_model_config_test
-        COMMAND flexon_model_config_test
-    )
-
-    target_link_libraries(
-        flexon_segment_model_generator_test
-        PRIVATE
-            flexon_offline_lib
-    )
-
-    add_test(
-        NAME flexon_segment_model_generator_test
-        COMMAND flexon_segment_model_generator_test
-    )
-
-    add_executable(
+    flexon_add_test(
         flexon_scheduler_test
-        tests/online/scheduler_test.cpp
+        src/tests/online/scheduler_test.cpp
     )
+    target_link_libraries(flexon_scheduler_test PRIVATE flexon_online_lib)
 
-    target_link_libraries(
-        flexon_scheduler_test
-        PRIVATE
-            flexon_online_lib
+    flexon_add_test(
+        flexon_resource_runtime_test
+        src/tests/online/resource_runtime_test.cpp
     )
+    target_link_libraries(flexon_resource_runtime_test PRIVATE flexon_online_lib)
 
-    add_test(
-        NAME flexon_scheduler_test
-        COMMAND flexon_scheduler_test
+    flexon_add_test(
+        flexon_buffer_arena_test
+        src/tests/online/buffer_arena_test.cpp
     )
+    target_link_libraries(flexon_buffer_arena_test PRIVATE flexon_online_lib)
+
+    flexon_add_test(
+        flexon_artifact_handler_test
+        src/tests/online/artifact_handler_test.cpp
+    )
+    target_link_libraries(flexon_artifact_handler_test PRIVATE flexon_online_lib)
+
+    flexon_add_test(
+        flexon_runtime_helper_test
+        src/tests/online/runtime_helper_test.cpp
+    )
+    target_link_libraries(flexon_runtime_helper_test PRIVATE flexon_online_lib)
+
+    flexon_add_test(
+        flexon_resource_monitor_test
+        src/tests/online/resource_monitor_test.cpp
+    )
+    target_link_libraries(flexon_resource_monitor_test PRIVATE flexon_online_lib)
+
+    flexon_add_test(
+        flexon_runtime_engine_test
+        src/tests/online/runtime_engine_test.cpp
+    )
+    target_link_libraries(flexon_runtime_engine_test PRIVATE flexon_online_lib)
 
     # ------------------------------------------------------------------------
     # General smoke test
     # ------------------------------------------------------------------------
 
-    add_executable(
+    flexon_add_test(
         flexon_smoke_test
-        tests/smoke_test.cpp
+        src/tests/smoke_test.cpp
     )
-
-    target_link_libraries(
-        flexon_smoke_test
-        PRIVATE
-            flexon_core
-    )
-
-    add_test(
-        NAME flexon_smoke_test
-        COMMAND flexon_smoke_test
-    )
+    target_link_libraries(flexon_smoke_test PRIVATE flexon_core)
 
 endif()
 

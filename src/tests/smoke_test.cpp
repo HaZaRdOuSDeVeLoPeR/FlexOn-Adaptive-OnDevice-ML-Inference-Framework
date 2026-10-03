@@ -1,6 +1,6 @@
-#include <flexon/core/types.hpp>
-
 #include <cassert>
+
+#include <flexon/core/types.hpp>
 
 int main() {
     flexon::core::SegmentInfo segment;

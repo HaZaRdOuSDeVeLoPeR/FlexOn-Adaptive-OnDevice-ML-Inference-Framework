@@ -104,10 +104,6 @@ void FlexOnRuntime::run(const RunOptions& options) {
                 "resource plan length must match the selected initial level "
                 "segment count");
         }
-        if (options.resource == core::Resource::Auto) {
-            throw std::invalid_argument(
-                "--resource-plan cannot be combined with --resource auto");
-        }
         for (const auto resource : options.resource_plan) {
             if (resource == core::Resource::Auto) {
                 throw std::invalid_argument(
@@ -126,6 +122,24 @@ void FlexOnRuntime::run(const RunOptions& options) {
             "config/scheduler.yaml";
         scheduler_config = scheduler::OnlineScheduler::load_config(default_config);
     }
+
+    // Explicit runtime overrides take precedence over scheduler.yaml. The
+    // executable deliberately controls recovery through --with-recovery so
+    // notebook experiments do not depend on a mutable YAML switch.
+    if (options.scheduler_alpha_override) {
+        scheduler_config.alpha = *options.scheduler_alpha_override;
+    }
+    if (options.scheduler_beta_override) {
+        scheduler_config.beta = *options.scheduler_beta_override;
+    }
+    if (options.scheduler_gamma_override) {
+        scheduler_config.gamma = *options.scheduler_gamma_override;
+    }
+    scheduler_config.recovery_enabled = options.with_recovery;
+
+    scheduler_config.alpha = std::max(0.0, scheduler_config.alpha);
+    scheduler_config.beta = std::max(scheduler_config.alpha, scheduler_config.beta);
+    scheduler_config.gamma = std::max(0.0, scheduler_config.gamma);
 
     scheduler::OnlineScheduler scheduler(scheduler_config);
     const bool dynamic_resource_selection =

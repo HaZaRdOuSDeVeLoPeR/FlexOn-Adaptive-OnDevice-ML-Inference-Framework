@@ -1,6 +1,6 @@
-#include <flexon/offline/artifact/artifact_validator.hpp>
 #include <flexon/offline/config/model_config.hpp>
 #include <flexon/offline/offline_engine.hpp>
+#include <flexon/offline/offline_helper.hpp>
 
 #include <filesystem>
 #include <iostream>
@@ -12,24 +12,16 @@ namespace {
 void usage(const char* program) {
     std::cout
         << "Usage:\n"
-        << "  " << program
-        << " --model <model.onnx>"
-        << " [--artifact <directory>]"
-        << " [--artifact-root <directory>]"
-        << " [--config <config/offline.yaml>]"
-        << " [--models-config <config/models.yaml>]\n\n"
-
-        << "  " << program
-        << " --all"
-        << " [--artifact-root <directory>]"
-        << " [--config <config/offline.yaml>]"
-        << " [--models-config <config/models.yaml>]\n\n"
-
+        << "  " << program << " [--all | --model <model.onnx>]\n"
+        << "  " << program << " --validate [--artifact <directory> | --all]\n\n"
         << "Options:\n"
-        << "  --model           Process one ONNX model.\n"
         << "  --all             Process every model in models.yaml.\n"
-        << "  --artifact        Explicit artifact directory for --model.\n"
-        << "  --artifact-root   Root directory for generated artifacts.\n"
+        << "                    Default when no generation selector is given.\n"
+        << "  --model           Process one ONNX model.\n"
+        << "  --validate        Validate existing artifacts only; never generate.\n"
+        << "  --artifact        Explicit artifact directory for --model, or the\n"
+        << "                    artifact to validate with --validate.\n"
+        << "  --artifact-root   Root directory for generated/validated artifacts.\n"
         << "                    Default: artifacts\n"
         << "  --config          Offline profiling configuration.\n"
         << "                    Default: config/offline.yaml\n"
@@ -38,25 +30,15 @@ void usage(const char* program) {
         << "  --help, -h        Show this help message.\n";
 }
 
-bool artifact_is_valid(
-    const std::filesystem::path& artifact_directory) {
-
+bool artifact_is_valid(const std::filesystem::path& artifact_directory) {
     if (!std::filesystem::exists(artifact_directory) ||
         !std::filesystem::is_directory(artifact_directory)) {
         return false;
     }
-
-    try {
-        flexon::offline::artifact::ArtifactValidator::validate(
-            artifact_directory);
-
-        return true;
-    } catch (const std::exception&) {
-        return false;
-    }
+    return flexon::offline::cli::validate_artifact(artifact_directory);
 }
 
-void process_model(
+void generate_model(
     const std::filesystem::path& model_path,
     const std::filesystem::path& artifact_directory,
     const std::filesystem::path& config_path,
@@ -69,20 +51,16 @@ void process_model(
         << "[offline] ========================================\n";
 
     if (artifact_is_valid(artifact_directory)) {
-        std::cout
-            << "[offline] artifact already exists and is valid; "
-            << "skipping\n";
-
+        std::cout << "[offline] artifact already exists and is valid; skipping\n";
         return;
     }
 
-    flexon::offline::OfflineEngine engine(
-        config_path,
-        models_config_path);
+    flexon::offline::OfflineEngine engine(config_path, models_config_path);
+    engine.run(model_path, artifact_directory);
 
-    engine.run(
-        model_path,
-        artifact_directory);
+    // Every fresh generation is validated before the process reports success.
+    flexon::offline::cli::validate_artifact_or_throw(artifact_directory);
+    std::cout << "[offline] generated artifact validated successfully\n";
 }
 
 }  // namespace
@@ -95,6 +73,7 @@ int main(int argc, char** argv) {
     std::filesystem::path models_config = "config/models.yaml";
 
     bool all = false;
+    bool validate_only = false;
 
     try {
         for (int i = 1; i < argc; ++i) {
@@ -110,6 +89,11 @@ int main(int argc, char** argv) {
                 continue;
             }
 
+            if (arg == "--validate") {
+                validate_only = true;
+                continue;
+            }
+
             if (arg == "--model" ||
                 arg == "--artifact" ||
                 arg == "--artifact-root" ||
@@ -117,12 +101,10 @@ int main(int argc, char** argv) {
                 arg == "--models-config") {
 
                 if (i + 1 >= argc) {
-                    throw std::invalid_argument(
-                        "Missing value for " + arg);
+                    throw std::invalid_argument("Missing value for " + arg);
                 }
 
                 const std::filesystem::path value = argv[++i];
-
                 if (arg == "--model") {
                     model = value;
                 } else if (arg == "--artifact") {
@@ -134,12 +116,29 @@ int main(int argc, char** argv) {
                 } else {
                     models_config = value;
                 }
-
                 continue;
             }
 
-            throw std::invalid_argument(
-                "Unknown argument: " + arg);
+            throw std::invalid_argument("Unknown argument: " + arg);
+        }
+
+        if (validate_only) {
+            if (!model.empty()) {
+                throw std::invalid_argument(
+                    "--validate cannot be combined with --model or generation options");
+            }
+            if (all && !artifact.empty()) {
+                throw std::invalid_argument(
+                    "--all and --artifact cannot be used together");
+            }
+
+            if (!artifact.empty()) {
+                flexon::offline::cli::validate_artifact_or_throw(artifact);
+            } else {
+                // --validate alone means validate every existing artifact.
+                flexon::offline::cli::validate_all_or_throw(artifact_root);
+            }
+            return 0;
         }
 
         if (all && !model.empty()) {
@@ -149,85 +148,56 @@ int main(int argc, char** argv) {
 
         if (all && !artifact.empty()) {
             throw std::invalid_argument(
-                "--artifact cannot be used with --all; "
-                "use --artifact-root instead");
+                "--artifact cannot be used with --all; use --artifact-root instead");
         }
 
+        // No generation selector means --all.
         if (!all && model.empty()) {
-            usage(argv[0]);
-            return 2;
+            all = true;
         }
-
-        // ---------------------------------------------------------------
-        // Single-model mode
-        // ---------------------------------------------------------------
 
         if (!all) {
             std::filesystem::path artifact_directory = artifact;
-
             if (artifact_directory.empty()) {
-                const auto model_name =
-                    model.stem().string();
-
-                artifact_directory =
-                    artifact_root / model_name;
+                artifact_directory = artifact_root / model.stem().string();
             }
 
-            process_model(
+            generate_model(
                 model,
                 artifact_directory,
                 config,
                 models_config);
-
             return 0;
         }
 
-        // ---------------------------------------------------------------
-        // Batch mode
-        // ---------------------------------------------------------------
-
         const auto models_config_data =
-            flexon::offline::config::load_models_config(
-                models_config);
+            flexon::offline::config::load_models_config(models_config);
 
         std::size_t generated = 0;
         std::size_t skipped = 0;
         std::size_t failed = 0;
 
-        for (const auto& model_spec :
-             models_config_data.models) {
-
-            const auto artifact_directory =
-                artifact_root / model_spec.name;
+        for (const auto& model_spec : models_config_data.models) {
+            const auto artifact_directory = artifact_root / model_spec.name;
 
             try {
                 if (artifact_is_valid(artifact_directory)) {
-                    std::cout
-                        << "\n[offline] "
-                        << model_spec.name
-                        << ": valid artifact exists; skipping\n";
-
+                    std::cout << "\n[offline] " << model_spec.name
+                              << ": valid artifact exists; skipping\n";
                     ++skipped;
                     continue;
                 }
 
-                process_model(
+                generate_model(
                     model_spec.path,
                     artifact_directory,
                     config,
                     models_config);
-
                 ++generated;
-
             } catch (const std::exception& error) {
                 ++failed;
-
-                std::cerr
-                    << "\n[offline] ERROR processing model '"
-                    << model_spec.name
-                    << "': "
-                    << error.what()
-                    << '\n';
+                std::cerr << "\n[offline] ERROR processing model '"
+                          << model_spec.name << "': " << error.what() << '\n';
             }
         }
 
@@ -242,11 +212,7 @@ int main(int argc, char** argv) {
         return failed == 0 ? 0 : 1;
 
     } catch (const std::exception& error) {
-        std::cerr
-            << "[offline] ERROR: "
-            << error.what()
-            << '\n';
-
+        std::cerr << "[offline] ERROR: " << error.what() << '\n';
         return 1;
     }
 }

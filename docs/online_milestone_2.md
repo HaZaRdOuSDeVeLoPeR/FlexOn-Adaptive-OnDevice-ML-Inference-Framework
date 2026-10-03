@@ -51,7 +51,7 @@ cmake --build build -j2
 Uniform CPU:
 
 ```bash
-./apps/flexon_online_tester \
+./apps/flexon_online \
   --artifact artifacts/resnet18 \
   --level 4 \
   --resource cpu \
@@ -61,7 +61,7 @@ Uniform CPU:
 Uniform CUDA:
 
 ```bash
-./apps/flexon_online_tester \
+./apps/flexon_online \
   --artifact artifacts/resnet18 \
   --level 4 \
   --resource cuda \
@@ -71,7 +71,7 @@ Uniform CUDA:
 Alternating resources:
 
 ```bash
-./apps/flexon_online_tester \
+./apps/flexon_online \
   --artifact artifacts/resnet18 \
   --level 4 \
   --resource-plan cpu,cuda,cpu,cuda,cpu \

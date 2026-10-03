@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <flexon/core/types.hpp>
@@ -31,6 +32,13 @@ struct RunOptions {
     // Enable FlexOn's AD/MI segmentation-level selection across inference
     // periods. The supplied level is used as the initial level.
     bool adaptive_level{false};
+    // Optional command-line overrides for scheduler.yaml values.
+    std::optional<double> scheduler_alpha_override;
+    std::optional<double> scheduler_beta_override;
+    std::optional<double> scheduler_gamma_override;
+    // CLI-facing recovery switch. The experiment executable defaults to
+    // recovery disabled and enables it only when --with-recovery is given.
+    bool with_recovery{false};
     // Optional scheduler configuration. An empty path uses
     // config/scheduler.yaml when present, otherwise paper defaults.
     std::filesystem::path scheduler_config_path;

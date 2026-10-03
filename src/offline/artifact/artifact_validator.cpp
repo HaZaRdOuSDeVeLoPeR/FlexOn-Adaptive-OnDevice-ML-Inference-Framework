@@ -1,10 +1,8 @@
+#include <stdexcept>
+
 #include <flexon/offline/artifact/artifact_validator.hpp>
 #include <flexon/offline/model/onnx_model_loader.hpp>
-
 #include <yaml-cpp/yaml.h>
-
-#include <fstream>
-#include <stdexcept>
 
 namespace flexon::offline::artifact {
 
