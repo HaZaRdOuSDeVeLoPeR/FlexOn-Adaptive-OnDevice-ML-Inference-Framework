@@ -1,14 +1,11 @@
 #pragma once
 
 #include <flexon/core/types.hpp>
-#include <flexon/online/runtime_engine.hpp>
+#include <flexon/online/artifact/manifest_loader.hpp>
+#include <flexon/online/execution/executor.hpp>
+#include <flexon/online/execution/buffer_arena.hpp>
 
-#include <cstdint>
-#include <filesystem>
-#include <limits>
-#include <memory>
-
-namespace flexon::online {
+namespace flexon::online::scheduler {
 
 /**
  * Runtime scheduler parameters corresponding to FlexOn's online policy.
@@ -35,11 +32,13 @@ struct SchedulerSegmentCosts {
 };
 
 struct SchedulerDecision {
-    RuntimeResource resource{RuntimeResource::CPU};
+    core::Resource resource{core::Resource::CPU};
     double score{std::numeric_limits<double>::infinity()};
     double degradation{1.0};
     double remaining_capacity{1.0};
 };
+
+SchedulerSegmentCosts scheduler_costs(const manifest::SegmentManifest& segment);
 
 class OnlineScheduler {
 public:
@@ -60,7 +59,7 @@ public:
 
     SchedulerDecision select_next_resource(
         const SchedulerSegmentCosts& current,
-        RuntimeResource current_resource,
+        core::Resource current_resource,
         double current_measured_ms,
         const SchedulerSegmentCosts& next) const;
 
@@ -69,7 +68,7 @@ public:
     // paper's Eq. (5) right-hand side. Its score is d_r * C_r(s_i).
     SchedulerDecision select_recovery_resource(
         const SchedulerSegmentCosts& current,
-        RuntimeResource current_resource) const;
+        core::Resource current_resource) const;
 
     bool should_trigger_recovery(
         double current_elapsed_ms,
@@ -81,7 +80,7 @@ public:
         double measured_period_ms,
         double expected_period_ms) const;
 
-    double remaining_capacity(RuntimeResource resource) const;
+    double remaining_capacity(core::Resource resource) const;
 
     const SchedulerConfig& config() const noexcept { return config_; }
 
@@ -91,4 +90,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace flexon::online
+} // namespace flexon::online::scheduler

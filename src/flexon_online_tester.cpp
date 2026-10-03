@@ -13,16 +13,16 @@ void usage(const char* program) {
                  " [--iterations N] [--resource-plan cpu,cuda,...] [--adaptive-level] [--scheduler-config path]\n";
 }
 
-std::vector<flexon::online::RuntimeResource> resource_plan_from_string(
+std::vector<flexon::core::Resource> resource_plan_from_string(
     const std::string& value) {
-    std::vector<flexon::online::RuntimeResource> plan;
+    std::vector<flexon::core::Resource> plan;
     std::size_t start = 0;
     while (start < value.size()) {
         const auto comma = value.find(',', start);
         const auto token = value.substr(
             start, comma == std::string::npos ? std::string::npos : comma - start);
-        if (token == "cpu") plan.push_back(flexon::online::RuntimeResource::CPU);
-        else if (token == "cuda") plan.push_back(flexon::online::RuntimeResource::CUDA);
+        if (token == "cpu") plan.push_back(flexon::core::Resource::CPU);
+        else if (token == "cuda") plan.push_back(flexon::core::Resource::CUDA);
         else throw std::invalid_argument(
             "resource-plan entries must be cpu or cuda: " + token);
         if (comma == std::string::npos) break;
@@ -31,10 +31,10 @@ std::vector<flexon::online::RuntimeResource> resource_plan_from_string(
     return plan;
 }
 
-flexon::online::RuntimeResource resource_from_string(const std::string& value) {
-    if (value == "cpu") return flexon::online::RuntimeResource::CPU;
-    if (value == "cuda") return flexon::online::RuntimeResource::CUDA;
-    if (value == "auto") return flexon::online::RuntimeResource::Auto;
+flexon::core::Resource resource_from_string(const std::string& value) {
+    if (value == "cpu") return flexon::core::Resource::CPU;
+    if (value == "cuda") return flexon::core::Resource::CUDA;
+    if (value == "auto") return flexon::core::Resource::Auto;
     throw std::invalid_argument("Unknown resource: " + value);
 }
 

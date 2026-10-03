@@ -14,9 +14,9 @@ void print_usage(const char* program) {
            " [--iterations N] [--resource-plan cpu,cuda,...]\n";
 }
 
-std::vector<flexon::online::RuntimeResource> parse_resource_plan(
+std::vector<flexon::core::Resource> parse_resource_plan(
     const std::string& value) {
-    std::vector<flexon::online::RuntimeResource> plan;
+    std::vector<flexon::core::Resource> plan;
     std::size_t start = 0;
     while (start < value.size()) {
         const auto comma = value.find(',', start);
@@ -25,9 +25,9 @@ std::vector<flexon::online::RuntimeResource> parse_resource_plan(
         if (token.empty()) {
             throw std::invalid_argument("Empty resource-plan entry");
         }
-        if (token == "cpu") plan.push_back(flexon::online::RuntimeResource::CPU);
-        else if (token == "cuda") plan.push_back(flexon::online::RuntimeResource::CUDA);
-        else if (token == "auto") plan.push_back(flexon::online::RuntimeResource::Auto);
+        if (token == "cpu") plan.push_back(flexon::core::Resource::CPU);
+        else if (token == "cuda") plan.push_back(flexon::core::Resource::CUDA);
+        else if (token == "auto") plan.push_back(flexon::core::Resource::Auto);
         else throw std::invalid_argument("Unknown resource in plan: " + token);
         if (comma == std::string::npos) break;
         start = comma + 1;
@@ -35,10 +35,10 @@ std::vector<flexon::online::RuntimeResource> parse_resource_plan(
     return plan;
 }
 
-flexon::online::RuntimeResource parse_resource(const std::string& value) {
-    if (value == "cpu") return flexon::online::RuntimeResource::CPU;
-    if (value == "cuda") return flexon::online::RuntimeResource::CUDA;
-    if (value == "auto") return flexon::online::RuntimeResource::Auto;
+flexon::core::Resource parse_resource(const std::string& value) {
+    if (value == "cpu") return flexon::core::Resource::CPU;
+    if (value == "cuda") return flexon::core::Resource::CUDA;
+    if (value == "auto") return flexon::core::Resource::Auto;
     throw std::invalid_argument("Unknown resource: " + value);
 }
 

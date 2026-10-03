@@ -6,23 +6,28 @@
 #include <memory>
 #include <vector>
 
+#include <flexon/core/types.hpp>
+#include <flexon/core/types.hpp>
+#include <flexon/online/artifact/manifest_loader.hpp>
+#include <flexon/online/resource/resource_runtime.hpp>
+#include <flexon/online/resource/resource_monitor.hpp>
+#include <flexon/online/execution/buffer_arena.hpp>
+#include <flexon/online/execution/executor.hpp>
+#include <flexon/online/scheduler/scheduler.hpp>
+#include <flexon/online/scheduler/recovery_manager.hpp>
+#include <flexon/online/runtime_engine.hpp>
+
 namespace flexon::online {
 
 struct FlexOnRuntimeImpl;
 
-enum class RuntimeResource : std::uint8_t {
-    CPU,
-    CUDA,
-    Auto
-};
-
 struct RunOptions {
     std::uint32_t iterations{1};
     std::uint32_t level{0};
-    RuntimeResource resource{RuntimeResource::CPU};
+    core::Resource resource{core::Resource::CPU};
     // Optional per-segment execution plan. When non-empty, its size must
     // match the selected level segment count.
-    std::vector<RuntimeResource> resource_plan;
+    std::vector<core::Resource> resource_plan;
     // Enable FlexOn's AD/MI segmentation-level selection across inference
     // periods. The supplied level is used as the initial level.
     bool adaptive_level{false};
@@ -34,14 +39,14 @@ struct RunOptions {
 /**
  * Online runtime for executing a frozen offline artifact.
  *
- * Milestone 1/2/3/4 runtime for executing a frozen offline artifact.
+ * Runtime for executing a frozen offline artifact.
  * All supported segment/resource session variants are prepared by load().
  * Segment execution uses I/O binding and explicit CPU/CUDA tensor placement;
  * cross-resource boundary copies are measured separately from compute time.
  * Segment-boundary buffers are reused by the Milestone-3 activation arena
  * when tensor shape, type, resource, and lifetime permit.
- * Milestone 4 adds the paper's AD/MI level selection and degradation-aware
- * per-segment resource selection when RuntimeResource::Auto is requested.
+ * AD/MI level selection and degradation-aware per-segment resource 
+ * selection when RuntimeResource::Auto is requested.
  */
 class FlexOnRuntime {
 public:

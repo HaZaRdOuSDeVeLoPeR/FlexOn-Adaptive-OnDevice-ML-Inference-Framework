@@ -16,7 +16,8 @@ namespace flexon::core {
  */
 enum class Resource : std::uint8_t {
     CPU,
-    CUDA
+    CUDA,
+    Auto
 };
 
 /**

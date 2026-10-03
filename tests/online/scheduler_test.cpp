@@ -1,14 +1,14 @@
-#include <flexon/online/scheduler.hpp>
+#include <flexon/online/scheduler/scheduler.hpp>
 
 #include <cassert>
 #include <cmath>
 
 int main() {
-    flexon::online::SchedulerConfig config;
+    flexon::online::scheduler::SchedulerConfig config;
     config.alpha = 1.2;
     config.beta = 1.6;
 
-    flexon::online::OnlineScheduler scheduler(config);
+    flexon::online::scheduler::OnlineScheduler scheduler(config);
 
     constexpr int current_level = 2;
     constexpr int max_level = 4;
@@ -55,26 +55,26 @@ int main() {
         alpha_boundary - 0.1,
         expected_period_ms) == 0);
 
-    flexon::online::SchedulerSegmentCosts costs;
+    flexon::online::scheduler::SchedulerSegmentCosts costs;
     costs.cpu = {true, 10.0};
     costs.cuda = {true, 2.0};
 
     const auto first = scheduler.select_first_resource(costs);
-    assert(first.resource == flexon::online::RuntimeResource::CUDA);
+    assert(first.resource == flexon::core::Resource::CUDA);
 
     const auto next = scheduler.select_next_resource(
         costs,
-        flexon::online::RuntimeResource::CPU,
+        flexon::core::Resource::CPU,
         30.0,
         costs);
 
-    assert(next.resource == flexon::online::RuntimeResource::CUDA);
+    assert(next.resource == flexon::core::Resource::CUDA);
     assert(next.score > 0.0);
     assert(std::isfinite(next.score));
 
     const auto recovery = scheduler.select_recovery_resource(
-        costs, flexon::online::RuntimeResource::CPU);
-    assert(recovery.resource == flexon::online::RuntimeResource::CUDA);
+        costs, flexon::core::Resource::CPU);
+    assert(recovery.resource == flexon::core::Resource::CUDA);
     assert(recovery.score > 0.0);
     assert(std::isfinite(recovery.score));
     assert(!scheduler.should_trigger_recovery(2.5, recovery.score));

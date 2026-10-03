@@ -320,8 +320,15 @@ add_library(
     flexon_online_lib
     STATIC
 
+    src/online/artifact/artifact_handler.cpp
+    src/online/execution/buffer_arena.cpp
+    src/online/execution/executor.cpp
+    src/online/execution/helper.cpp
+    src/online/resource/resource_monitor.cpp
+    src/online/resource/resource_runtime.cpp
+    src/online/scheduler/recovery_manager.cpp
+    src/online/scheduler/scheduler.cpp
     src/online/runtime_engine.cpp
-    src/online/scheduler.cpp
 )
 
 target_include_directories(
