@@ -155,13 +155,15 @@ void FlexOnRuntime::run(const RunOptions& options) {
     arena::BufferArena arena;
 
     std::uint32_t current_level = options.level;
-    double period_measured_ms = 0.0;
-    double period_expected_ms = 0.0;
-
+    double period_expected_ms, period_measured_ms;
+    
     try {
         for (std::uint32_t iteration = 0;
-             iteration < options.iterations;
-             ++iteration) {
+            iteration < options.iterations;
+            ++iteration) {
+                
+            period_measured_ms = 0.0;
+            period_expected_ms = 0.0;
 
             auto& level = impl_->state->levels[current_level];
             if (level.empty()) {
@@ -322,6 +324,9 @@ void FlexOnRuntime::run(const RunOptions& options) {
                 }
             }
 
+            std::cout
+                << "[scheduler] iteration measured_ms=" << period_measured_ms << '\n';
+
             for (auto& recovery : background_recoveries) {
                 try {
                     recovery.get();
@@ -360,8 +365,6 @@ void FlexOnRuntime::run(const RunOptions& options) {
                     << " -> " << next_level << '\n';
 
                 current_level = next_level;
-                period_measured_ms = 0.0;
-                period_expected_ms = 0.0;
             }
         }
     } catch (...) {

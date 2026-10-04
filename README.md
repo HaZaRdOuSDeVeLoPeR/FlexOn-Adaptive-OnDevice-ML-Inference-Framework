@@ -114,6 +114,39 @@ Every benchmark should record:
 - end-to-end latency
 - percentile statistics
 
+# FlexOn experiment harness
+
+The experiment layer has two responsibilities with a hard boundary between them.
+
+## Contention environment
+
+`contention.py` is responsible only for creating and removing external resource load.
+
+- `ContentionSpec.none()` — no load
+- `ContentionSpec.cpu(workers)` — CPU load
+- `ContentionSpec.gpu(command, workers=...)` — GPU load using a caller-supplied long-running workload
+- `ContentionSpec.both(...)` — simultaneous CPU and GPU load
+- `ContentionSession` — start/stop lifecycle
+
+It does not import or invoke the FlexOn runtime.
+
+## Experiment execution and analysis
+
+- `runner.py` — invokes `flexon_online` and parses its stdout.
+- `measurements.py` — extracts authoritative iteration latency and computes statistics.
+- `analysis.py` — converts records into comparable dataframes.
+- `plotting.py` — creates figures from those dataframes.
+- `config.py` — stores benchmark invocation settings.
+
+The runner has no contention parameter. This is intentional: the same benchmark code is used under idle and contended environments.
+
+## Notebook workflow
+
+1. `contention_generator.ipynb`: configure/start/stop external contention.
+2. `experiments.ipynb`: run the six FlexOn execution modes, summarize, plot, and save results.
+
+Run the contention notebook in a separate live kernel when contention is required.
+
 ## Reference
 
 The paper's workflow has an offline phase that profiles operators and creates
