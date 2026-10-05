@@ -2,7 +2,6 @@
 
 #include <filesystem>
 #include <memory>
-#include <stdexcept>
 
 #include <onnx/onnx_pb.h>
 

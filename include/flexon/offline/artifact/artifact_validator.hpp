@@ -1,8 +1,7 @@
 #pragma once
 
-#include <flexon/offline/config/offline_config.hpp>
-
 #include <filesystem>
+#include <flexon/offline/config/offline_config.hpp>
 
 namespace flexon::offline::artifact {
 

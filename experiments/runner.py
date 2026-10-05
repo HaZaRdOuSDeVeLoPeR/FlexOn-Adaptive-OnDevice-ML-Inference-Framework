@@ -251,7 +251,11 @@ def run_online(
     cwd: Optional[Path] = None,
 ) -> ExperimentRun:
     """Run ``flexon_online`` once and parse its stdout."""
+    # Priority isolation is implemented by flexon_online itself. The
+    # scheduler thread invokes the narrowly-scoped privileged helper after
+    # CUDA/ORT initialization, while inference remains normal priority.
     command = config.command(binary=binary)
+
     completed = subprocess.run(
         command,
         cwd=cwd or binary.parent.parent,

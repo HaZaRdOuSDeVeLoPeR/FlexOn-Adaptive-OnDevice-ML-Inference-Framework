@@ -1,11 +1,11 @@
-#include <flexon/offline/config/model_config.hpp>
-#include <flexon/offline/offline_engine.hpp>
-#include <flexon/offline/offline_helper.hpp>
-
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+
+#include <flexon/offline/config/model_config.hpp>
+#include <flexon/offline/offline_engine.hpp>
+#include <flexon/offline/offline_helper.hpp>
 
 int main(int argc, char** argv) {
     std::filesystem::path model;

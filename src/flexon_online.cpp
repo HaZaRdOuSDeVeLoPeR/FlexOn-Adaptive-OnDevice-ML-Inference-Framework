@@ -1,10 +1,10 @@
-#include <flexon/online/runtime_engine.hpp>
-#include <flexon/online/runtime_helper.hpp>
-
 #include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
+
+#include <flexon/online/runtime_engine.hpp>
+#include <flexon/online/runtime_helper.hpp>
 
 namespace {
 
@@ -14,9 +14,10 @@ T require_value(int& index, int argc, char** argv, const std::string& option) {
         throw std::invalid_argument("Missing value for " + option);
     }
     return T(argv[++index]);
+
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
     try {
@@ -68,6 +69,8 @@ int main(int argc, char** argv) {
                     require_value<std::string>(i, argc, argv, arg));
             } else if (arg == "--with-recovery") {
                 with_recovery = true;
+            } else if (arg == "--priority-isolation") {
+                options.priority_isolation = true;
             } else if (arg == "--scheduler-config") {
                 options.scheduler_config_path = require_value<std::string>(
                     i, argc, argv, arg);

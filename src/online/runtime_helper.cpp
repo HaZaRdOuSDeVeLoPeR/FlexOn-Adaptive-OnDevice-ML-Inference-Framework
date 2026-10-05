@@ -30,6 +30,8 @@ void print_usage(const char* program) {
         << "                                    Default: 1.3\n"
         << "  --with-recovery                   Enable speculative recovery.\n"
         << "                                    Default: false\n"
+        << "  --priority-isolation              Scheduler/control thread uses maximum Linux real-time priority\n"
+        << "                                    inference stays normal.\n"
         << "  --scheduler-config <p>            Scheduler configuration file.\n"
         << "                                    Default: config/scheduler.yaml\n"
         << "  --help, -h                        Show this help message.\n";

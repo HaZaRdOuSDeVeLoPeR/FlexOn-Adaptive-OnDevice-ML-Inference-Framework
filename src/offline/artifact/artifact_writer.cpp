@@ -1,13 +1,9 @@
-#include <flexon/offline/artifact/artifact_writer.hpp>
-
-#include <flexon/offline/model/segment_model_generator.hpp>
-
-#include <yaml-cpp/yaml.h>
-
 #include <fstream>
-#include <iomanip>
-#include <sstream>
 #include <stdexcept>
+
+#include <flexon/offline/artifact/artifact_writer.hpp>
+#include <flexon/offline/model/segment_model_generator.hpp>
+#include <yaml-cpp/yaml.h>
 
 namespace flexon::offline::artifact {
 

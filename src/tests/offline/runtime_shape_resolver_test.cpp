@@ -1,8 +1,8 @@
-#include <flexon/offline/graph/graph_analyzer.hpp>
-#include <flexon/offline/shapes/runtime_shape_resolver.hpp>
-
 #include <cassert>
 #include <iostream>
+
+#include <flexon/offline/graph/graph_analyzer.hpp>
+#include <flexon/offline/shapes/runtime_shape_resolver.hpp>
 
 int main() {
     onnx::ModelProto model;

@@ -1,10 +1,10 @@
-#include <flexon/offline/model/onnx_model_loader.hpp>
-
 #include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+
+#include <flexon/offline/model/onnx_model_loader.hpp>
 
 namespace {
 

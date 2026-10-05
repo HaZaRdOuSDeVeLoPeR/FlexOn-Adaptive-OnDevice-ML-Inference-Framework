@@ -1,6 +1,6 @@
-#include <flexon/offline/model/onnx_model_loader.hpp>
-
 #include <fstream>
+
+#include <flexon/offline/model/onnx_model_loader.hpp>
 
 namespace flexon::offline::model {
 

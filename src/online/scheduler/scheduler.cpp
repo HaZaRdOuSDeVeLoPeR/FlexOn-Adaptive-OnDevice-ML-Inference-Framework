@@ -1,7 +1,10 @@
+#include <future>
 #include <thread>
+#include <iostream>
 
 #include <flexon/online/scheduler/scheduler.hpp>
 #include <flexon/online/resource/resource_monitor.hpp>
+#include <flexon/online/scheduler/thread_priority.hpp>
 
 namespace flexon::online::scheduler {
 
@@ -90,20 +93,45 @@ void OnlineScheduler::start() {
     }
 
     impl_->running = true;
-    impl_->monitor_thread = std::thread([this]() {
-        while (impl_->running) {
-            impl_->update_once();
+    auto startup = std::make_shared<std::promise<void>>();
+    auto startup_result = startup->get_future();
 
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(
-                    config_.resource_sample_interval_ms));
+    impl_->monitor_thread = std::thread([this, startup]() {
+        try {
+            if (config_.priority_isolation) {
+                priority::promote_current_thread();
+            }
+
+            std::cout << "[priority] scheduler thread ready tid="
+                      << priority::current_thread_id() << " "
+                      << priority::describe_current_thread() << '\n';
+            startup->set_value();
+
+            while (impl_->running) {
+                impl_->update_once();
+
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(
+                        config_.resource_sample_interval_ms));
+            }
+        } catch (...) {
+            impl_->running = false;
+            try {
+                startup->set_exception(std::current_exception());
+            } catch (...) {
+            }
         }
     });
+
+    try {
+        startup_result.get();
+    } catch (...) {
+        stop();
+        throw;
+    }
 }
 
 void OnlineScheduler::stop() {
-    if (!impl_->running) return;
-
     impl_->running = false;
     if (impl_->monitor_thread.joinable()) {
         impl_->monitor_thread.join();

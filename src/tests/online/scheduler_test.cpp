@@ -110,13 +110,13 @@ int main() {
         "flexon_scheduler_test.yaml";
     {
         std::ofstream file(config_path);
-        file << "alpha: 1.4\n"
-             << "beta: 1.8\n"
-             << "gamma: 1.5\n"
-             << "resource_monitor:\n"
-             << "  sample_interval_ms: 25\n"
-             << "resource_selection:\n"
-             << "  sample_interval_ms: 75\n";
+        file<< "level_selection:\n"
+            << "  alpha: 1.4\n"
+            << "  beta: 1.8\n"
+            << "recovery:\n"
+            << "  gamma: 1.5\n"
+            << "resource_monitor:\n"
+            << "  sample_interval_ms: 25\n";
     }
 
     const auto loaded =

@@ -42,6 +42,9 @@ struct RunOptions {
     // Optional scheduler configuration. An empty path uses
     // config/scheduler.yaml when present, otherwise paper defaults.
     std::filesystem::path scheduler_config_path;
+    // When enabled, the FlexOn control thread runs at maximum Linux
+    // real-time priority while inference execution runs at normal priority.
+    bool priority_isolation{false};
 };
 
 /**

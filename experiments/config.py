@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ONLINE_BINARY = PROJECT_ROOT / "build" / "apps" / "flexon_online"
+DEFAULT_ONLINE_BINARY = PROJECT_ROOT / "apps" / "flexon_online"
 DEFAULT_SCHEDULER_CONFIG = PROJECT_ROOT / "config" / "scheduler.yaml"
 
 
@@ -31,6 +31,7 @@ class RunConfig:
     beta: Optional[float] = None
     gamma: Optional[float] = None
     recovery: bool = False
+    priority_isolation: bool = False
     scheduler_config: Path = DEFAULT_SCHEDULER_CONFIG
 
     def __post_init__(self) -> None:
@@ -78,6 +79,8 @@ class RunConfig:
             command += ["--gamma", str(self.gamma)]
         if self.recovery:
             command.append("--with-recovery")
+        if self.priority_isolation:
+            command.append("--priority-isolation")
 
         return command
 

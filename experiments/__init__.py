@@ -16,13 +16,15 @@ from .analysis import (
     run_summary_dataframe,
     summarize_latency,
     compare_latency,
+    runtime_diagnostics_dataframe,
 )
-from .contention import ContentionSession, ContentionSpec, run_with_contention
 from .plotting import (
     plot_latency_comparison,
     plot_tail_latency,
     plot_latency_distribution,
     plot_latency_percentiles,
+    plot_resource_execution_breakdown,
+    plot_level_changes,
 )
 
 __all__ = [
@@ -39,11 +41,11 @@ __all__ = [
     "run_summary_dataframe",
     "summarize_latency",
     "compare_latency",
-    "ContentionSession",
-    "ContentionSpec",
-    "run_with_contention",
+    "runtime_diagnostics_dataframe",
     "plot_latency_comparison",
     "plot_tail_latency",
     "plot_latency_distribution",
     "plot_latency_percentiles",
+    "plot_resource_execution_breakdown",
+    "plot_level_changes"
 ]

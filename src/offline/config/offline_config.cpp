@@ -1,8 +1,7 @@
-#include <flexon/offline/config/offline_config.hpp>
-
-#include <yaml-cpp/yaml.h>
-
 #include <stdexcept>
+
+#include <flexon/offline/config/offline_config.hpp>
+#include <yaml-cpp/yaml.h>
 
 namespace flexon::offline::config {
 

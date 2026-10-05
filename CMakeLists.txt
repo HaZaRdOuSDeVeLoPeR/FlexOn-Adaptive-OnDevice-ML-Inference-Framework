@@ -334,6 +334,7 @@ add_library(
     src/online/resource/resource_runtime.cpp
     src/online/scheduler/recovery_manager.cpp
     src/online/scheduler/scheduler.cpp
+    src/online/scheduler/thread_priority.cpp
     src/online/runtime_helper.cpp
     src/online/runtime_engine.cpp
 )
@@ -386,6 +387,14 @@ if(FLEXON_BUILD_APPS)
         PRIVATE
             flexon_core
             flexon_online_lib
+    )
+
+    # Tiny privileged helper used only to promote the already-running
+    # scheduler/control thread. CAP_SYS_NICE is installed on this helper,
+    # never on flexon_online, so CUDA/WSL initialization remains untouched.
+    add_executable(
+        flexon_scheduler_helper
+        src/online/scheduler_helper.cpp
     )
 
 endif()
@@ -516,5 +525,32 @@ message(STATUS "")
 message(STATUS "ORT root:            ${FLEXON_ORT_ROOT}")
 message(STATUS "ORT build:           ${FLEXON_ORT_BUILD_DIR}")
 message(STATUS "ONNX build:          ${FLEXON_ONNX_BUILD_DIR}")
-message(STATUS "==============================================")
 message(STATUS "")
+
+add_custom_target(BuildFinishedMessage ALL
+    COMMAND ${CMAKE_COMMAND} -E echo "==============================================="
+    COMMAND ${CMAKE_COMMAND} -E echo "Build Completed successfully!"
+    COMMAND ${CMAKE_COMMAND} -E echo "==============================================="
+    COMMAND ${CMAKE_COMMAND} -E echo "To Elevate the Flexon Online Scheduler:" 
+    COMMAND ${CMAKE_COMMAND} -E echo "Run ./setup_flexon_scheduler.sh"
+    COMMAND ${CMAKE_COMMAND} -E echo "==============================================="
+)
+
+add_dependencies(BuildFinishedMessage
+    flexon_offline
+    flexon_online
+    flexon_scheduler_helper
+    flexon_artifact_handler_test
+    flexon_onnx_model_loader_test
+    flexon_runtime_helper_test
+    flexon_smoke_test
+    flexon_buffer_arena_test
+    flexon_resource_monitor_test
+    flexon_runtime_shape_resolver_test
+    flexon_graph_analyzer_test
+    flexon_resource_runtime_test
+    flexon_scheduler_test
+    flexon_model_config_test
+    flexon_runtime_engine_test
+    flexon_segment_model_generator_test
+)

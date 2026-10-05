@@ -1,4 +1,3 @@
-#include "flexon/core/types.hpp"
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -15,8 +14,10 @@
 #include <onnxruntime_cxx_api.h>
 #include <cuda_runtime_api.h>
 #include <yaml-cpp/yaml.h>
+#include <flexon/core/types.hpp>
 #include <flexon/online/execution/helper.hpp>
 #include <flexon/online/runtime_engine.hpp>
+#include <flexon/online/scheduler/thread_priority.hpp>
 
 
 namespace flexon::online {
@@ -142,12 +143,24 @@ void FlexOnRuntime::run(const RunOptions& options) {
     scheduler_config.beta = std::max(scheduler_config.alpha, scheduler_config.beta);
     scheduler_config.gamma = std::max(0.0, scheduler_config.gamma);
 
+    if (options.priority_isolation &&
+        options.resource != core::Resource::Auto) {
+        throw std::invalid_argument(
+            "--priority-isolation requires --resource auto so a dedicated "
+            "scheduler/control thread is active");
+    }
+
+    scheduler_config.priority_isolation = options.priority_isolation;
+
     scheduler::OnlineScheduler scheduler(scheduler_config);
     const bool dynamic_resource_selection =
         options.resource == core::Resource::Auto;
 
     if (dynamic_resource_selection) {
         scheduler.start();
+        if (options.priority_isolation) {
+            std::cout << "[priority] inference policy=SCHED_OTHER priority=0\n";
+        }
     }
 
     // The arena persists across all inference periods and levels so buffers
@@ -276,6 +289,10 @@ void FlexOnRuntime::run(const RunOptions& options) {
                 executor::SegmentExecutionStats stats;
                 if (dynamic_resource_selection &&
                     scheduler_config.recovery_enabled) {
+                    // Recovery orchestration is scheduler/control work and
+                    // therefore remains at the caller's SCHED_FIFO priority.
+                    // The recovery manager runs the actual primary and
+                    // speculative inference workers at SCHED_OTHER.
                     stats = recovery::execute_segment_with_recovery(
                         segment,
                         requested_resource,
@@ -287,6 +304,11 @@ void FlexOnRuntime::run(const RunOptions& options) {
                         impl_->state->allocator,
                         background_recoveries);
                 } else {
+                    std::unique_ptr<priority::ScopedLevel> inference_priority;
+                    if (options.priority_isolation) {
+                        inference_priority = std::make_unique<priority::ScopedLevel>(
+                            priority::Level::Normal);
+                    }
                     stats = executor::execute_segment(
                         segment,
                         requested_resource,

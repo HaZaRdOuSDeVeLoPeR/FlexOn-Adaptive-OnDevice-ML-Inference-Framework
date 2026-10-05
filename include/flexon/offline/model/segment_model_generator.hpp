@@ -1,10 +1,9 @@
 #pragma once
 
-#include <flexon/core/types.hpp>
-
-#include <onnx/onnx_pb.h>
-
 #include <filesystem>
+
+#include <flexon/core/types.hpp>
+#include <onnx/onnx_pb.h>
 
 namespace flexon::offline::model {
 

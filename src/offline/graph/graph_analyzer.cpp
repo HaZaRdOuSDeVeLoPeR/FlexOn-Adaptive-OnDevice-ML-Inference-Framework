@@ -1,9 +1,8 @@
-#include <flexon/offline/graph/graph_analyzer.hpp>
-
-#include <onnx/shape_inference/implementation.h>
-
 #include <stdexcept>
 #include <string>
+
+#include <flexon/offline/graph/graph_analyzer.hpp>
+#include <onnx/shape_inference/implementation.h>
 
 namespace flexon::offline::graph {
 

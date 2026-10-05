@@ -1,12 +1,12 @@
 #pragma once
 
+#include <filesystem>
+
 #include <flexon/core/types.hpp>
 #include <flexon/offline/config/offline_config.hpp>
 #include <flexon/offline/segmentation/multi_level_segmenter.hpp>
-
 #include <onnx/onnx_pb.h>
 
-#include <filesystem>
 
 namespace flexon::offline::artifact {
 

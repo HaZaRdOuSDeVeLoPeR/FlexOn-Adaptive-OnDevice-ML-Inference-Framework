@@ -1,8 +1,8 @@
-#include <flexon/offline/segmentation/initial_segmenter.hpp>
-
 #include <algorithm>
 #include <stdexcept>
 #include <unordered_set>
+
+#include <flexon/offline/segmentation/initial_segmenter.hpp>
 
 namespace flexon::offline::segmentation {
 

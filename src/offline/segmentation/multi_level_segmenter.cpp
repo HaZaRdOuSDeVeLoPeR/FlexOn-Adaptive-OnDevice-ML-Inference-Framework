@@ -1,11 +1,11 @@
-#include <flexon/offline/segmentation/multi_level_segmenter.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
+
+#include <flexon/offline/segmentation/multi_level_segmenter.hpp>
 
 namespace flexon::offline::segmentation {
 

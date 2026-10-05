@@ -1,12 +1,12 @@
 #pragma once
 
+#include <vector>
+
 #include <flexon/core/types.hpp>
 #include <flexon/offline/config/offline_config.hpp>
 #include <flexon/offline/profiling/segment_profiler.hpp>
-
 #include <onnx/onnx_pb.h>
 
-#include <vector>
 
 namespace flexon::offline::segmentation {
 

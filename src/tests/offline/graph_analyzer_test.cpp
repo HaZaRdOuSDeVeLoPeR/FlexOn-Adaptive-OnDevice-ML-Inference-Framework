@@ -1,8 +1,8 @@
-#include <flexon/offline/graph/graph_analyzer.hpp>
-
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
+
+#include <flexon/offline/graph/graph_analyzer.hpp>
 
 namespace {
 

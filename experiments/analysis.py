@@ -1,9 +1,13 @@
 """Experiment-level analysis helpers for FlexOn benchmark runs."""
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
+
 import pandas as pd
+
 from .measurements import LatencySummary, RunMeasurements
+
 
 @dataclass(frozen=True)
 class ExperimentRecord:
@@ -12,69 +16,149 @@ class ExperimentRecord:
     measurements: RunMeasurements
     repetition: int = 1
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
     def __post_init__(self) -> None:
-        if not self.experiment.strip(): raise ValueError("experiment name cannot be empty")
-        if self.repetition <= 0: raise ValueError("repetition must be greater than zero")
+        if not self.experiment.strip():
+            raise ValueError("experiment name cannot be empty")
+        if self.repetition <= 0:
+            raise ValueError("repetition must be greater than zero")
+
 
 def latency_samples_dataframe(records: Iterable[ExperimentRecord]) -> pd.DataFrame:
     """Flatten iteration latency samples into one row per measured iteration."""
-    rows=[]
+    rows = []
     for record in records:
-        base={"experiment":record.experiment,"repetition":record.repetition}
+        base = {"experiment": record.experiment, "repetition": record.repetition}
         base.update(record.metadata)
-        for i, latency in enumerate(record.measurements.iteration_latencies_ms,1):
-            row=dict(base); row["sample"]=i; row["latency_ms"]=latency; rows.append(row)
-    columns=["experiment","repetition","sample","latency_ms"]
-    if not rows: return pd.DataFrame(columns=columns)
-    extra=[c for c in rows[0] if c not in columns]
-    return pd.DataFrame(rows, columns=columns+extra)
+        for i, latency in enumerate(record.measurements.iteration_latencies_ms, 1):
+            row = dict(base)
+            row["sample"] = i
+            row["latency_ms"] = latency
+            rows.append(row)
+    columns = ["experiment", "repetition", "sample", "latency_ms"]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    extra = [c for c in rows[0] if c not in columns]
+    return pd.DataFrame(rows, columns=columns + extra)
+
 
 def run_summary_dataframe(records: Iterable[ExperimentRecord]) -> pd.DataFrame:
     """Return one row per measured repetition with core latency statistics."""
-    rows=[]
+    rows = []
     for record in records:
-        s=record.measurements.latency
-        row={"experiment":record.experiment,"repetition":record.repetition,
-             "count":s.count,"mean_ms":s.mean_ms,"median_ms":s.median_ms,
-             "p90_ms":s.p90_ms,"p95_ms":s.p95_ms,"p99_ms":s.p99_ms,
-             "min_ms":s.min_ms,"max_ms":s.max_ms,"std_ms":s.std_ms}
-        row.update(record.metadata); rows.append(row)
-    columns=["experiment","repetition","count","mean_ms","median_ms","p90_ms","p95_ms","p99_ms","min_ms","max_ms","std_ms"]
-    if not rows: return pd.DataFrame(columns=columns)
-    extra=[c for c in rows[0] if c not in columns]
-    return pd.DataFrame(rows, columns=columns+extra)
+        s = record.measurements.latency
+        row = {
+            "experiment": record.experiment,
+            "repetition": record.repetition,
+            "count": s.count,
+            "mean_ms": s.mean_ms,
+            "median_ms": s.median_ms,
+            "p90_ms": s.p90_ms,
+            "p95_ms": s.p95_ms,
+            "p99_ms": s.p99_ms,
+            "min_ms": s.min_ms,
+            "max_ms": s.max_ms,
+            "std_ms": s.std_ms,
+        }
+        row.update(record.metadata)
+        rows.append(row)
+    columns = ["experiment", "repetition", "count", "mean_ms", "median_ms", "p90_ms", "p95_ms", "p99_ms", "min_ms", "max_ms", "std_ms"]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    extra = [c for c in rows[0] if c not in columns]
+    return pd.DataFrame(rows, columns=columns + extra)
 
-def summarize_latency(records: Iterable[ExperimentRecord], *, by: Sequence[str]=( "experiment",)) -> pd.DataFrame:
+
+def summarize_latency(records: Iterable[ExperimentRecord], *, by: Sequence[str] = ("experiment",)) -> pd.DataFrame:
     """Pool iteration samples and calculate latency statistics by condition."""
-    samples=latency_samples_dataframe(records)
-    columns=list(by)+_summary_columns()
-    if samples.empty: return pd.DataFrame(columns=columns)
-    missing=[c for c in by if c not in samples.columns]
-    if missing: raise KeyError(f"grouping columns not found: {missing}")
-    rows=[]
+    samples = latency_samples_dataframe(records)
+    columns = list(by) + _summary_columns()
+    if samples.empty:
+        return pd.DataFrame(columns=columns)
+    missing = [c for c in by if c not in samples.columns]
+    if missing:
+        raise KeyError(f"grouping columns not found: {missing}")
+    rows = []
     for keys, group in samples.groupby(list(by), sort=False, dropna=False):
         if len(by) == 1:
             keys = (keys[0],) if isinstance(keys, tuple) else (keys,)
-        s=LatencySummary.from_samples(group["latency_ms"].tolist())
-        row=dict(zip(by,keys)); row.update(_summary_dict(s)); rows.append(row)
+        s = LatencySummary.from_samples(group["latency_ms"].tolist())
+        row = dict(zip(by, keys))
+        row.update(_summary_dict(s))
+        rows.append(row)
     return pd.DataFrame(rows, columns=columns)
 
-def compare_latency(summary: pd.DataFrame, *, baseline: str, experiment_column: str="experiment") -> pd.DataFrame:
+
+def runtime_diagnostics_dataframe(records: Iterable[ExperimentRecord]) -> pd.DataFrame:
+    """Return presentation-friendly runtime-path diagnostics per repetition."""
+    rows = []
+    for record in records:
+        m = record.measurements
+        level_usage = ", ".join(f"L{level}:{count}" for level, count in m.level_usage)
+        row = {
+            "experiment": record.experiment,
+            "repetition": record.repetition,
+            "cpu_segment_executions": m.cpu_execution_count,
+            "cuda_segment_executions": m.cuda_execution_count,
+            "total_segment_executions": m.total_segment_executions,
+            "avg_segments_per_iteration": m.average_segments_per_iteration,
+            "cpu_execution_pct": m.cpu_execution_pct,
+            "cuda_execution_pct": m.cuda_execution_pct,
+            "adaptive_decisions": m.adaptive_decision_count,
+            "level_changes": m.level_transitions,
+            "levels_used": level_usage or "-",
+            "recovery_count": m.recovery_count,
+            "recovery_trigger_rate_pct": m.recovery_trigger_rate_pct,
+            "recovery_primary_wins": m.recovery_primary_wins,
+            "recovery_alternative_wins": m.recovery_alternative_wins,
+            "recovery_unresolved": m.recovery_unresolved,
+        }
+        row.update(record.metadata)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def compare_latency(summary: pd.DataFrame, *, baseline: str, experiment_column: str = "experiment") -> pd.DataFrame:
     """Compare each summary row against a named baseline using mean latency."""
-    missing={experiment_column,"mean_ms"}-set(summary.columns)
-    if missing: raise KeyError(f"summary is missing required columns: {sorted(missing)}")
-    base=summary[summary[experiment_column]==baseline]
-    if len(base)!=1: raise ValueError(f"baseline '{baseline}' must identify exactly one summary row; found {len(base)}")
-    base_mean=float(base.iloc[0]["mean_ms"])
-    if base_mean<=0: raise ValueError("baseline mean latency must be greater than zero")
-    result=summary.copy()
-    result["delta_ms"]=result["mean_ms"]-base_mean
-    result["speedup"]=base_mean/result["mean_ms"]
-    result["latency_reduction_pct"]=(base_mean-result["mean_ms"])/base_mean*100.0
+    missing = {experiment_column, "mean_ms"} - set(summary.columns)
+    if missing:
+        raise KeyError(f"summary is missing required columns: {sorted(missing)}")
+    base = summary[summary[experiment_column] == baseline]
+    if len(base) != 1:
+        raise ValueError(f"baseline '{baseline}' must identify exactly one summary row; found {len(base)}")
+    required_metrics = {"mean_ms", "p95_ms", "p99_ms"}
+    missing_metrics = required_metrics - set(summary.columns)
+    if missing_metrics:
+        raise KeyError(
+            f"summary is missing latency metrics: {sorted(missing_metrics)}"
+        )
+
+    base_mean = float(base.iloc[0]["mean_ms"])
+    base_p95 = float(base.iloc[0]["p95_ms"])
+    base_p99 = float(base.iloc[0]["p99_ms"])
+    if base_mean <= 0 or base_p95 <= 0 or base_p99 <= 0:
+        raise ValueError("baseline latency metrics must be greater than zero")
+
+    result = summary.copy()
+    result["delta_ms"] = result["mean_ms"] - base_mean
+    result["speedup"] = base_mean / result["mean_ms"]
+    result["latency_reduction_pct"] = (
+        (base_mean - result["mean_ms"]) / base_mean * 100.0
+    )
+    result["p95_delta_ms"] = result["p95_ms"] - base_p95
+    result["p95_reduction_pct"] = (
+        (base_p95 - result["p95_ms"]) / base_p95 * 100.0
+    )
+    result["p99_delta_ms"] = result["p99_ms"] - base_p99
+    result["p99_reduction_pct"] = (
+        (base_p99 - result["p99_ms"]) / base_p99 * 100.0
+    )
     return result
 
-def _summary_dict(s: LatencySummary)->dict[str,Any]:
-    return {"count":s.count,"mean_ms":s.mean_ms,"median_ms":s.median_ms,"p90_ms":s.p90_ms,"p95_ms":s.p95_ms,"p99_ms":s.p99_ms,"min_ms":s.min_ms,"max_ms":s.max_ms,"std_ms":s.std_ms}
 
-def _summary_columns()->list[str]:
-    return ["count","mean_ms","median_ms","p90_ms","p95_ms","p99_ms","min_ms","max_ms","std_ms"]
+def _summary_dict(s: LatencySummary) -> dict[str, Any]:
+    return {"count": s.count, "mean_ms": s.mean_ms, "median_ms": s.median_ms, "p90_ms": s.p90_ms, "p95_ms": s.p95_ms, "p99_ms": s.p99_ms, "min_ms": s.min_ms, "max_ms": s.max_ms, "std_ms": s.std_ms}
+
+
+def _summary_columns() -> list[str]:
+    return ["count", "mean_ms", "median_ms", "p90_ms", "p95_ms", "p99_ms", "min_ms", "max_ms", "std_ms"]

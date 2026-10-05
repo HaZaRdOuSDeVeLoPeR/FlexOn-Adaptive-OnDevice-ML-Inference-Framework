@@ -1,9 +1,9 @@
-#include <flexon/offline/config/model_config.hpp>
-
 #include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+
+#include <flexon/offline/config/model_config.hpp>
 
 namespace {
 

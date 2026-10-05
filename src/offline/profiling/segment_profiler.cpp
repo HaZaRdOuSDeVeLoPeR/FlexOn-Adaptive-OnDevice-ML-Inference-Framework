@@ -1,7 +1,3 @@
-#include <flexon/offline/profiling/segment_profiler.hpp>
-#include <flexon/offline/model/segment_model_generator.hpp>
-#include <onnxruntime_cxx_api.h>
-
 #include <algorithm>
 #include <chrono>
 #include <memory>
@@ -12,6 +8,10 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <flexon/offline/profiling/segment_profiler.hpp>
+#include <flexon/offline/model/segment_model_generator.hpp>
+#include <onnxruntime_cxx_api.h>
 
 namespace flexon::offline::profiling {
 

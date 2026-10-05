@@ -1,7 +1,3 @@
-#include <flexon/offline/shapes/runtime_shape_resolver.hpp>
-#include <onnx/shape_inference/implementation.h>
-#include <onnxruntime_cxx_api.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -9,6 +5,10 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <flexon/offline/shapes/runtime_shape_resolver.hpp>
+#include <onnx/shape_inference/implementation.h>
+#include <onnxruntime_cxx_api.h>
 
 namespace flexon::offline::shapes {
 

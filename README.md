@@ -1,6 +1,6 @@
-# FlexOn — ONNX Runtime C++ Reimplementation
+# FlexOn — ONNX Runtime C++ Implementation
 
-A modular C++ reimplementation of the FlexOn framework proposed in:
+A modular C++ Implementation of the FlexOn framework proposed in:
 
 > Minsung Kim et al., "Mitigating Resource Contention for Responsive On-device Machine Learning Inferences", IEEE/ACM ICCAD 2025.
 
@@ -134,8 +134,8 @@ It does not import or invoke the FlexOn runtime.
 
 - `runner.py` — invokes `flexon_online` and parses its stdout.
 - `measurements.py` — extracts authoritative iteration latency and computes statistics.
-- `analysis.py` — converts records into comparable dataframes.
-- `plotting.py` — creates figures from those dataframes.
+- `analysis.py` — converts records into comparable dataframes and builds runtime-path diagnostics (resource execution counts, segmentation usage, level changes and recovery activity).
+- `plotting.py` — creates overview and focused research figures, including latency distributions, percentile views, resource-execution breakdowns and adaptive-level diagnostics.
 - `config.py` — stores benchmark invocation settings.
 
 The runner has no contention parameter. This is intentional: the same benchmark code is used under idle and contended environments.
@@ -147,8 +147,57 @@ The runner has no contention parameter. This is intentional: the same benchmark 
 
 Run the contention notebook in a separate live kernel when contention is required.
 
+The experiment notebook intentionally provides both all-configuration and
+FlexOn-only latency plots. The fixed CPU baseline is much slower than the
+other configurations, so a focused view is used to keep low-latency boxplots
+and percentile curves readable. Runtime-path diagnostics are presented
+separately from user-facing latency metrics.
+
 ## Reference
 
 The paper's workflow has an offline phase that profiles operators and creates
 multi-level segments, followed by an online phase that selects a segmentation
 level and resource dynamically and can trigger recovery execution.
+
+## Priority-isolated contention experiments
+
+FlexOn supports an experiment-only priority-isolation mode in which the
+dedicated scheduler/control thread runs at the maximum Linux `SCHED_FIFO`
+priority while actual inference execution remains at normal `SCHED_OTHER`
+priority. Linux scheduling policy is per-thread, so this isolates the control
+plane without promoting the ONNX Runtime/CUDA execution threads.
+
+The runtime itself performs the promotion from `OnlineScheduler::start()`. It
+first initializes CUDA/ONNX Runtime normally, then the scheduler thread invokes
+a tiny, separately installed helper carrying only `CAP_SYS_NICE`. The helper
+validates that the target TID belongs to the invoking FlexOn process before
+calling `sched_setscheduler()`. `flexon_online` itself never receives
+`CAP_SYS_NICE`, and should not be launched through `sudo`.
+
+One-time setup after building:
+
+```bash
+./scripts/setup_priority_helper.sh
+getcap /usr/local/libexec/flexon-scheduler-priority
+```
+
+Expected capability:
+
+```text
+/usr/local/libexec/flexon-scheduler-priority cap_sys_nice=ep
+```
+
+Run normally; no launcher is required:
+
+```bash
+apps/flexon_online \
+    --artifact artifacts/resnet18 \
+    --iterations 10 \
+    --resource auto \
+    --priority-isolation
+```
+
+The runtime reports the scheduler thread's TID and scheduling policy. If the
+helper is missing, not privileged, or fails verification, priority-isolated
+execution fails instead of silently running an incorrectly configured
+experiment.

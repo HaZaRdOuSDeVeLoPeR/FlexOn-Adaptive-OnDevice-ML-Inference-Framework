@@ -1,12 +1,12 @@
-#include <flexon/offline/graph/graph_analyzer.hpp>
-#include <flexon/offline/model/segment_model_generator.hpp>
-#include <flexon/offline/segmentation/initial_segmenter.hpp>
-
 #include <algorithm>
 #include <cassert>
 #include <iostream>
 #include <limits>
 #include <utility>
+
+#include <flexon/offline/graph/graph_analyzer.hpp>
+#include <flexon/offline/model/segment_model_generator.hpp>
+#include <flexon/offline/segmentation/initial_segmenter.hpp>
 
 int main() {
     onnx::ModelProto model;

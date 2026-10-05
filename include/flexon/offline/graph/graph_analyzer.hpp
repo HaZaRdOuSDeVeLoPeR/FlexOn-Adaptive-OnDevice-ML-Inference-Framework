@@ -1,7 +1,6 @@
 #pragma once
 
 #include <onnx/onnx_pb.h>
-
 #include <flexon/core/types.hpp>
 
 namespace flexon::offline::graph {

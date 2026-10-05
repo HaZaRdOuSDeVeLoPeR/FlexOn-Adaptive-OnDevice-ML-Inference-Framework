@@ -1,11 +1,10 @@
 #pragma once
 
+#include <filesystem>
+
 #include <flexon/core/types.hpp>
 #include <flexon/offline/config/offline_config.hpp>
-
 #include <onnx/onnx_pb.h>
-
-#include <filesystem>
 
 namespace flexon::offline::profiling {
 

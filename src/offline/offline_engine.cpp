@@ -1,5 +1,7 @@
-#include <flexon/offline/offline_engine.hpp>
+#include <iostream>
+#include <stdexcept>
 
+#include <flexon/offline/offline_engine.hpp>
 #include <flexon/offline/artifact/artifact_validator.hpp>
 #include <flexon/offline/artifact/artifact_writer.hpp>
 #include <flexon/offline/config/offline_config.hpp>
@@ -11,8 +13,6 @@
 #include <flexon/offline/segmentation/multi_level_segmenter.hpp>
 #include <flexon/offline/shapes/runtime_shape_resolver.hpp>
 
-#include <iostream>
-#include <stdexcept>
 
 namespace flexon::offline {
 

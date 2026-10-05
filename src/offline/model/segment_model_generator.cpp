@@ -1,10 +1,10 @@
-#include <flexon/offline/model/segment_model_generator.hpp>
-
 #include <algorithm>
 #include <fstream>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <flexon/offline/model/segment_model_generator.hpp>
 
 namespace flexon::offline::model {
 

@@ -19,6 +19,9 @@ struct SchedulerConfig {
     double beta{1.6};
     double gamma{1.3};
     bool recovery_enabled{true};
+    // Keep scheduler/control work at maximum SCHED_FIFO priority while
+    // inference execution is explicitly demoted to SCHED_OTHER.
+    bool priority_isolation{false};
     // Resource-monitor sampling interval in milliseconds.
     std::uint32_t resource_sample_interval_ms{50};
 };

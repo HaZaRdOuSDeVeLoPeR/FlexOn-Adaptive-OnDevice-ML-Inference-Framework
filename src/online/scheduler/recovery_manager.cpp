@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 
+#include <flexon/online/scheduler/thread_priority.hpp>
 #include <flexon/online/scheduler/recovery_manager.hpp>
 #include <flexon/online/execution/executor.hpp>
 #include <flexon/online/execution/helper.hpp>
@@ -61,6 +62,7 @@ executor::SegmentExecutionStats execute_segment_with_recovery(
             std::launch::async,
             [&segment, resource, &tensor_store, &arena, &allocator,
              ready, completion, recovery]() {
+                priority::ScopedLevel normal(priority::Level::Normal);
                 try {
                     auto result = executor::execute_segment_once(
                         segment,
