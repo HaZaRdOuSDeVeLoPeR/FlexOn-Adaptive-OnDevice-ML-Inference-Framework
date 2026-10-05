@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FlexOn VERSION 0.1.0 LANGUAGES CXX)
+project(FlexOn VERSION 0.1.0 LANGUAGES CXX CUDA)
 
 # ============================================================================
 # Configuration
@@ -9,8 +9,13 @@ project(FlexOn VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES OFF)
+set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_INCLUDES OFF)
 
 option(FLEXON_BUILD_TESTS "Build FlexOn tests" ON)
 option(FLEXON_BUILD_APPS "Build FlexOn applications" ON)
@@ -37,11 +42,44 @@ if(FLEXON_ENABLE_WARNINGS)
         $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wunused-variable>
         $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wunused-function>
     )
+
+    # Optional: Apply specific flags for CUDA files handled by NVCC
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wall,-Wextra>
+    )
 endif()
 
 # Milestone 2 uses the CUDA runtime for explicit CPU<->CUDA boundary copies.
 # ONNX Runtime remains responsible for executing CUDA segment kernels.
 find_package(CUDAToolkit REQUIRED)
+find_package(Threads REQUIRED)
+
+# NVML provides the measured GPU utilization used by the closed-loop
+# contention controller. WSL2 installations normally expose the driver
+# library under /usr/lib/wsl/lib.
+find_path(FLEXON_NVML_INCLUDE_DIR
+    NAMES nvml.h
+    PATHS
+        /usr/include
+        /usr/local/cuda/include
+        /usr/include/nvidia
+        /usr/include/nvidia-ml
+)
+
+find_library(FLEXON_NVML_LIBRARY
+    NAMES nvidia-ml nvidia-ml.so.1
+    PATHS
+        /usr/lib/wsl/lib
+        /usr/lib/x86_64-linux-gnu
+        /usr/lib64
+        /usr/local/cuda/lib64
+)
+
+if(NOT FLEXON_NVML_INCLUDE_DIR OR NOT FLEXON_NVML_LIBRARY)
+    message(FATAL_ERROR
+        "NVML headers/library not found. GPU contention monitoring requires "
+        "nvml.h and libnvidia-ml.")
+endif()
 
 # User-facing applications are generated into the project apps/ directory.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY
@@ -318,6 +356,57 @@ target_link_libraries(
 )
 
 # ============================================================================
+# Contention library
+# ============================================================================
+
+add_library(
+    flexon_contention_lib
+    STATIC
+
+    src/contention/contention_generator.cpp
+    src/contention/monitor.cpp
+    src/contention/cpu_stressor.cpp
+    src/contention/bandwidth_stressor.cpp
+    src/contention/gpu_stressor.cu
+)
+
+target_include_directories(
+    flexon_contention_lib
+    PUBLIC
+        "${FLEXON_INCLUDE_DIR}"
+        "${FLEXON_NVML_INCLUDE_DIR}"
+    INTERFACE
+        "${FLEXON_INCLUDE_DIR}"
+)
+
+set_target_properties(
+    flexon_contention_lib
+    PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+)
+
+# Suppress benign host-static library warnings inside nvlink
+target_compile_options(
+    flexon_contention_lib
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xnvlink=-w>
+)
+
+target_link_libraries(
+    flexon_contention_lib
+    PRIVATE
+        $<$<LINK_LANGUAGE:CXX>:Threads::Threads>
+)
+
+target_link_libraries(
+    flexon_contention_lib
+    PUBLIC
+        flexon_core
+        CUDA::cudart
+        "${FLEXON_NVML_LIBRARY}"
+)
+
+# ============================================================================
 # Online library
 # ============================================================================
 
@@ -387,6 +476,19 @@ if(FLEXON_BUILD_APPS)
         PRIVATE
             flexon_core
             flexon_online_lib
+    )
+
+    # Standalone closed-loop contention generator. Targets are measured
+    # resource load percentages rather than raw stressor duty cycles.
+    add_executable(
+        flexon_contention
+        src/flexon_contention.cpp
+    )
+
+    target_link_libraries(
+        flexon_contention
+        PRIVATE
+            flexon_contention_lib
     )
 
     # Tiny privileged helper used only to promote the already-running
@@ -553,4 +655,5 @@ add_dependencies(BuildFinishedMessage
     flexon_model_config_test
     flexon_runtime_engine_test
     flexon_segment_model_generator_test
+    flexon_contention
 )
