@@ -21,7 +21,7 @@ inline double random_value(std::uint64_t& state) noexcept {
 }
 
 void compute_kernel(std::uint64_t& state) noexcept {
-    static volatile double sink = 0.0;
+    thread_local double sink = 0.0;
     // Randomized inputs prevent the compiler from collapsing the workload to
     // a fixed expression. FMA keeps the workload predominantly arithmetic.
     double a = random_value(state) * 2.0 - 1.0;

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <stdexcept>
 
 #include <flexon/offline/config/offline_config.hpp>
@@ -30,6 +31,7 @@ OfflineConfig load(const std::filesystem::path& path) {
     const auto validation = root["validation"];
     const auto provider = root["provider_partition"];
     const auto resources = root["resources"];
+    const auto degradation = root["degradation_profiling"];
 
     if (profiling) {
         config.warmup_iterations =
@@ -71,6 +73,25 @@ OfflineConfig load(const std::filesystem::path& path) {
         }
     }
 
+
+    if (degradation) {
+        config.degradation_profiling_enabled =
+            optional(degradation, "enabled", config.degradation_profiling_enabled);
+        config.degradation_cpu_percent =
+            optional(degradation, "cpu_percent", config.degradation_cpu_percent);
+        config.degradation_gpu_percent =
+            optional(degradation, "gpu_percent", config.degradation_gpu_percent);
+        config.degradation_dram_percent =
+            optional(degradation, "dram_percent", config.degradation_dram_percent);
+        config.degradation_vram_percent =
+            optional(degradation, "vram_percent", config.degradation_vram_percent);
+        config.degradation_safety_factor =
+            optional(degradation, "safety_factor", config.degradation_safety_factor);
+        config.degradation_stabilization_seconds =
+            optional(degradation, "stabilization_seconds",
+                     config.degradation_stabilization_seconds);
+    }
+
     if (resources) {
         config.cpu_enabled =
             optional(resources, "cpu_enabled", config.cpu_enabled);
@@ -78,6 +99,21 @@ OfflineConfig load(const std::filesystem::path& path) {
             optional(resources, "cuda_enabled", config.cuda_enabled);
         config.cuda_device_id =
             optional(resources, "cuda_device_id", config.cuda_device_id);
+    }
+
+    const auto valid_percent = [](double value) {
+        return std::isfinite(value) && value >= 0.0 && value <= 100.0;
+    };
+
+    if (!valid_percent(config.degradation_cpu_percent) ||
+        !valid_percent(config.degradation_gpu_percent) ||
+        !valid_percent(config.degradation_dram_percent) ||
+        !valid_percent(config.degradation_vram_percent) ||
+        !std::isfinite(config.degradation_safety_factor) ||
+        config.degradation_safety_factor <= 0.0 ||
+        config.degradation_safety_factor > 1.0 ||
+        config.degradation_stabilization_seconds == 0) {
+        throw std::invalid_argument("Invalid degradation profiling configuration");
     }
 
     if (config.warmup_iterations == 0 ||

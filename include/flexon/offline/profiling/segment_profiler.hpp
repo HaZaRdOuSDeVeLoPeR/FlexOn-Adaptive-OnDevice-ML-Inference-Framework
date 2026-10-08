@@ -18,6 +18,15 @@ public:
         const core::GraphInfo& graph,
         const core::SegmentInfo& segment);
 
+    // Profile the same segment under the active external contention workload.
+    // The normal mean/percentile fields remain the ideal profile; the observed
+    // The returned mean_ms is the contended measurement; the offline engine
+    // converts it to a per-segment/resource maximum degradation ratio.
+    core::SegmentProfile profile_under_contention(
+        const onnx::ModelProto& source,
+        const core::GraphInfo& graph,
+        const core::SegmentInfo& segment);
+
     /**
      * Probe and profile one source-graph operator on every enabled resource.
      *

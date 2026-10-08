@@ -18,6 +18,8 @@ struct SegmentManifest {
     bool cuda_supported{false};
     double cpu_mean_ms{std::numeric_limits<double>::infinity()};
     double cuda_mean_ms{std::numeric_limits<double>::infinity()};
+    double cpu_max_degradation_ratio{1.0};
+    double cuda_max_degradation_ratio{1.0};
 };
 
 struct LevelManifest {

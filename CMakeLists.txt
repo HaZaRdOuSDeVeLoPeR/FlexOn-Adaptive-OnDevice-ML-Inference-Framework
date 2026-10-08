@@ -382,7 +382,7 @@ target_include_directories(
 set_target_properties(
     flexon_contention_lib
     PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_SEPARABLE_COMPILATION OFF
 )
 
 # Suppress benign host-static library warnings inside nvlink
@@ -461,6 +461,7 @@ if(FLEXON_BUILD_APPS)
         PRIVATE
             flexon_core
             flexon_offline_lib
+            flexon_contention_lib
     )
 
     # Online phase: runtime execution and validation behavior are exposed

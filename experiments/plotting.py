@@ -29,7 +29,10 @@ def plot_latency_comparison(
     axis.set_ylabel(_latency_label(metric))
     axis.set_title(title or f"FlexOn {metric} comparison")
     axis.tick_params(axis="x", rotation=30)
+
     figure.tight_layout()
+    plt.close(figure)
+    
     return figure
 
 
@@ -56,7 +59,10 @@ def plot_tail_latency(
     axis.set_title(title)
     axis.legend()
     axis.tick_params(axis="x", rotation=30)
+
     figure.tight_layout()
+    plt.close(figure)
+
     return figure
 
 
@@ -65,7 +71,7 @@ def plot_latency_distribution(
     *,
     value_column: str = "latency_ms",
     group_column: str = "experiment",
-    exclude_groups: list[str | None],
+    exclude_groups: list[str] = [],
     title: str = "FlexOn latency distribution",
 ):
     """Plot measured latency samples as a boxplot.
@@ -83,11 +89,8 @@ def plot_latency_distribution(
     if samples.empty:
         raise ValueError("cannot plot an empty sample dataframe")
 
-    frame = pd.DataFrame()
-
-    if len(exclude_groups):
-        excluded = set(exclude_groups)
-        frame = samples[~samples[group_column].isin(excluded)].copy()
+    excluded = set(exclude_groups)
+    frame = samples[~samples[group_column].isin(excluded)].copy()
 
     if frame.empty:
         raise ValueError("no samples remain after excluding groups")
@@ -123,9 +126,6 @@ def plot_latency_distribution(
     axis.tick_params(axis="x", rotation=30)
 
     figure.tight_layout()
-
-    # Prevent the Jupyter inline backend from rendering the same
-    # pyplot-managed figure a second time.
     plt.close(figure)
 
     return figure
@@ -169,7 +169,10 @@ def plot_latency_percentiles(
     axis.set_title(title)
     axis.legend()
     axis.tick_params(axis="x", rotation=30)
+
     figure.tight_layout()
+    plt.close(figure)
+
     return figure
 
 
@@ -209,7 +212,10 @@ def plot_resource_execution_breakdown(
     axis.set_title(title)
     axis.legend()
     axis.tick_params(axis="x", rotation=30)
+
     figure.tight_layout()
+    plt.close(figure)
+    
     return figure
 
 
@@ -230,7 +236,10 @@ def plot_level_changes(
     axis.set_ylabel("Level changes / measured run")
     axis.set_title(title)
     axis.tick_params(axis="x", rotation=30)
+    
     figure.tight_layout()
+    plt.close(figure)
+
     return figure
 
 

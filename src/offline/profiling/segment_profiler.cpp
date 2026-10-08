@@ -414,6 +414,19 @@ core::SegmentProfile SegmentProfiler::profile(
     return profile;
 }
 
+core::SegmentProfile SegmentProfiler::profile_under_contention(
+    const onnx::ModelProto& source,
+    const core::GraphInfo& graph,
+    const core::SegmentInfo& segment) {
+
+    // Reuse the exact profiling path used for ideal measurements. It already
+    // performs the configured warmup iterations and then computes mean_ms
+    // from the configured measurement iterations. The offline engine compares
+    // this contended mean with the corresponding ideal mean and stores only
+    // the resulting maximum degradation ratio in the artifact.
+    return profile(source, graph, segment);
+}
+
 core::OperatorProfile SegmentProfiler::profile_operator(
     const onnx::ModelProto& source,
     const core::GraphInfo& graph,

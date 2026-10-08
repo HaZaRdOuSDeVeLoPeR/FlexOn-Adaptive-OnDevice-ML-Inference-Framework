@@ -64,12 +64,20 @@ ArtifactManifest load_manifest(const std::filesystem::path& directory) {
                     const double mean = cost["mean_ms"]
                         ? cost["mean_ms"].as<double>()
                         : std::numeric_limits<double>::infinity();
+                    const double max_degradation_ratio =
+                        cost["max_degradation_ratio"]
+                            ? cost["max_degradation_ratio"].as<double>()
+                            : 1.0;
                     if (resource == "cpu") {
                         segment.cpu_supported = true;
                         segment.cpu_mean_ms = mean;
+                        segment.cpu_max_degradation_ratio =
+                            std::max(1.0, max_degradation_ratio);
                     } else if (resource == "cuda") {
                         segment.cuda_supported = true;
                         segment.cuda_mean_ms = mean;
+                        segment.cuda_max_degradation_ratio =
+                            std::max(1.0, max_degradation_ratio);
                     }
                 }
             }

@@ -64,7 +64,8 @@ void ArtifactValidator::validate(
 
             for (const auto& cost : segment["costs"]) {
                 if (!cost["resource"] || !cost["status"] ||
-                    !cost["mean_ms"] || !cost["percentile_ms"]) {
+                    !cost["mean_ms"] || !cost["percentile_ms"] ||
+                    !cost["max_degradation_ratio"]) {
                     throw std::runtime_error(
                         "Artifact segment resource cost is incomplete");
                 }

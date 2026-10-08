@@ -8,14 +8,52 @@
 
 namespace flexon::online::scheduler {
 
+namespace {
+
+constexpr double kMinimumRemainingCapacity = 0.01;
+
+// Linear interpolation between the two offline/runtime anchor points:
+// (U_min, max_degradation_ratio) and (1, 1). U is lower-clamped to U_min
+// because the resource monitor may report values below that under saturation.
+double linear_degradation_impl(
+    double max_degradation_ratio,
+    double remaining_capacity) {
+
+    if (!std::isfinite(max_degradation_ratio) ||
+        max_degradation_ratio <= 1.0) {
+        return 1.0;
+    }
+
+    const double u = std::clamp(
+        remaining_capacity,
+        kMinimumRemainingCapacity,
+        1.0);
+
+    return max_degradation_ratio +
+           (max_degradation_ratio - 1.0) *
+               (kMinimumRemainingCapacity - u) /
+               (1.0 - kMinimumRemainingCapacity);
+}
+
+} // namespace
+
+double linear_degradation(
+    double max_degradation_ratio,
+    double remaining_capacity) {
+    return linear_degradation_impl(
+        max_degradation_ratio, remaining_capacity);
+}
+
 SchedulerSegmentCosts scheduler_costs(const manifest::SegmentManifest& segment) {
     return SchedulerSegmentCosts{
         SchedulerResourceCost{
             segment.cpu_supported,
-            segment.cpu_mean_ms},
+            segment.cpu_mean_ms,
+            std::max(1.0, segment.cpu_max_degradation_ratio)},
         SchedulerResourceCost{
             segment.cuda_supported,
-            segment.cuda_mean_ms}};
+            segment.cuda_mean_ms,
+            std::max(1.0, segment.cuda_max_degradation_ratio)}};
 }
 
 struct OnlineScheduler::Impl {
@@ -164,11 +202,10 @@ std::array<SchedulerDecision, 2> OnlineScheduler::select_first_resource(
             candidate == core::Resource::CPU ? next.cpu : next.cuda;
         if (!cost.supported || !std::isfinite(cost.expected_ms)) continue;
 
-        constexpr double kCapacityEpsilon = 1.0e-9;
         const double capacity =
             std::clamp(remaining_capacity(candidate), 0.0, 1.0);
         const double degradation =
-            1.0 / (capacity + kCapacityEpsilon);
+            linear_degradation(cost.max_degradation_ratio, capacity);
         const double score = degradation * cost.expected_ms;
 
         best[(int)candidate] =
@@ -220,12 +257,12 @@ std::array<SchedulerDecision, 2> OnlineScheduler::select_next_resource(
         if (candidate == current_resource) {
             degradation = current_degradation;
             capacity = std::clamp(
-                1.0 / std::max(degradation, 1.0e-9), 0.0, 1.0);
+                1.0 / std::max(degradation, kMinimumRemainingCapacity), 0.0, 1.0);
         } else {
-            constexpr double kCapacityEpsilon = 1.0e-9;
             capacity = std::clamp(
                 remaining_capacity(candidate), 0.0, 1.0);
-            degradation = 1.0 / (capacity + kCapacityEpsilon);
+            degradation =
+                linear_degradation(cost.max_degradation_ratio, capacity);
         }
 
         const double score = degradation * cost.expected_ms;
@@ -260,11 +297,10 @@ SchedulerDecision OnlineScheduler::select_recovery_resource(
             candidate == core::Resource::CPU ? current.cpu : current.cuda;
         if (!cost.supported || !std::isfinite(cost.expected_ms)) continue;
 
-        constexpr double kCapacityEpsilon = 1.0e-9;
         const double capacity =
             std::clamp(remaining_capacity(candidate), 0.0, 1.0);
         const double degradation =
-            1.0 / (capacity + kCapacityEpsilon);
+            linear_degradation(cost.max_degradation_ratio, capacity);
         const double score = degradation * cost.expected_ms;
 
         if (score < best.score) {

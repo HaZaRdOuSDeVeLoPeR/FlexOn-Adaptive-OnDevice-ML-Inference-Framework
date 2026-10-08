@@ -31,6 +31,7 @@ CpuSample read_cpu_sample() {
 
 double cpu_remaining_capacity(CpuSample& previous) {
     const auto current = read_cpu_sample();
+
     if (current.total <= previous.total ||
         current.idle < previous.idle) {
         previous = current;
@@ -41,12 +42,15 @@ double cpu_remaining_capacity(CpuSample& previous) {
     const auto idle_delta = current.idle - previous.idle;
     previous = current;
 
-    if (total_delta == 0) return 1.0;
+    if (total_delta == 0) {
+        return 1.0;
+    }
 
-    const double utilization =
-        std::min(1.0, static_cast<double>(idle_delta) /
-                          static_cast<double>(total_delta));
-    return std::clamp(1.0 - utilization, 0.0, 1.0);
+    const double remaining =
+        static_cast<double>(idle_delta) /
+        static_cast<double>(total_delta);
+
+    return std::clamp(remaining, 0.01, 1.0);
 }
 
 double query_cuda_remaining_capacity() {

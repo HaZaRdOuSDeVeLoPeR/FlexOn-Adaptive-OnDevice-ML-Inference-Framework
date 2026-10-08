@@ -29,6 +29,10 @@ struct SchedulerConfig {
 struct SchedulerResourceCost {
     bool supported{false};
     double expected_ms{std::numeric_limits<double>::infinity()};
+    // Maximum degradation ratio measured offline for this exact
+    // Maximum degradation ratio measured offline for this exact
+    // segment/resource pair.
+    double max_degradation_ratio{1.0};
 };
 
 struct SchedulerSegmentCosts {
@@ -44,6 +48,12 @@ struct SchedulerDecision {
 };
 
 SchedulerSegmentCosts scheduler_costs(const manifest::SegmentManifest& segment);
+
+// Linear degradation envelope between (U_min, max_degradation_ratio)
+// and (1, 1), with U_min = 0.01.
+double linear_degradation(
+    double max_degradation_ratio,
+    double remaining_capacity);
 
 class OnlineScheduler {
 public:

@@ -4,7 +4,7 @@ profiling:
   percentile: 95
 
 segmentation:
-  max_levels: 5
+  max_levels: 6
   average_segment_cost_threshold_ms: 1
   split_policy: max_min_balance
   initial_partition: fallback_operator
@@ -22,3 +22,12 @@ provider_partition:
   # per-operator resource capability profiling. These entries force a
   # reproducible resource boundary for the named ONNX op types.
   cuda_fallback_ops: []
+
+degradation_profiling:
+  enabled: true
+  cpu_percent: 100
+  gpu_percent: 100
+  dram_percent: 100
+  vram_percent: 100
+  safety_factor: 0.85
+  stabilization_seconds: 10

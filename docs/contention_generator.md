@@ -94,20 +94,32 @@ Only after the four independent stressors are stable should combined workloads b
 
 ## Offline integration
 
-The current implementation intentionally does **not** modify the offline profiling pipeline yet.
-Once standalone behavior is validated, the same `flexon_contention_lib` can be instantiated by the
-offline profiler. The intended later flow is:
+The offline phase now reuses the same `flexon_contention_lib` after normal profiling and
+segmentation. It waits for the configured stabilization period (10 seconds by default), then
+re-profiles every generated segment on each supported resource using the same warmup and
+measurement iteration settings as the ideal profile.
+
+Each segment/resource entry stores its own offline maximum degradation ratio as `max_degradation_ratio`:
 
 ```text
-idle profiling
+ideal profiling
       ↓
 standardized maximum contention
       ↓
-contention profiling
+10 s stabilization
       ↓
-segment slowdown ratios
+contended segment profiling
       ↓
-degradation_constant
+per-segment/resource max_degradation_ratio
       ↓
 manifest.yaml
 ```
+
+The slowdown ratio is intentionally **not** collapsed into a model-wide or level-wide constant.
+For a segment/resource pair it is:
+
+```text
+contended_mean_ms / mean_ms
+```
+
+This preserves the resource- and segment-specific behavior needed by the later online scheduler.

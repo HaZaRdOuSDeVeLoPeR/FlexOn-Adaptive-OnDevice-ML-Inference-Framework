@@ -158,6 +158,8 @@ void ArtifactWriter::write(
                      << cost.mean_ms;
                 yaml << YAML::Key << "percentile_ms" << YAML::Value
                      << cost.percentile_ms;
+                yaml << YAML::Key << "max_degradation_ratio" << YAML::Value
+                     << cost.max_degradation_ratio;
                 if (!cost.reason.empty()) {
                     yaml << YAML::Key << "reason" << YAML::Value
                          << cost.reason;

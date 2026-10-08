@@ -68,8 +68,8 @@ int main() {
         current_level, max_level, 10.0, 0.0) == current_level);
 
     flexon::online::scheduler::SchedulerSegmentCosts costs;
-    costs.cpu = {true, 10.0};
-    costs.cuda = {true, 2.0};
+    costs.cpu = {true, 10.0, 5.0};
+    costs.cuda = {true, 2.0, 10.0};
 
     const auto first = scheduler.select_first_resource(costs)[0];
     assert(first.resource == flexon::core::Resource::CUDA);
@@ -96,9 +96,27 @@ int main() {
     assert(!scheduler.should_trigger_recovery(-1.0, recovery.score));
     assert(!scheduler.should_trigger_recovery(10.0, -1.0));
 
+
+    // Linear degradation is anchored at (Umin=0.01, max_dr) and (1, 1).
+    assert(std::abs(
+        flexon::online::scheduler::linear_degradation(10.0, 1.0) -
+        1.0) < 1.0e-12);
+    assert(std::abs(
+        flexon::online::scheduler::linear_degradation(10.0, 0.01) -
+        10.0) < 1.0e-12);
+    assert(std::abs(
+        flexon::online::scheduler::linear_degradation(10.0, 0.0) -
+        10.0) < 1.0e-12);
+    assert(std::abs(
+        flexon::online::scheduler::linear_degradation(10.0, 0.5) -
+        (10.0 + 9.0 * (0.01 - 0.5) / (1.0 - 0.01))) <
+        1.0e-12);
+    assert(flexon::online::scheduler::linear_degradation(10.0, 0.5) <
+           flexon::online::scheduler::linear_degradation(10.0, 0.25));
+
     // If only one resource is supported, recovery has no alternative.
     flexon::online::scheduler::SchedulerSegmentCosts cpu_only;
-    cpu_only.cpu = {true, 5.0};
+    cpu_only.cpu = {true, 5.0, 5.0};
     cpu_only.cuda = {false, std::numeric_limits<double>::infinity()};
     const auto no_recovery = scheduler.select_recovery_resource(
         cpu_only, flexon::core::Resource::CPU);

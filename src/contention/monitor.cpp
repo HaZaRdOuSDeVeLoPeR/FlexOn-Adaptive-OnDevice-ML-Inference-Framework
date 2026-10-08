@@ -7,12 +7,26 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <mutex>
 
 #include <nvml.h>
 
 namespace flexon::contention {
 
 namespace {
+
+// NVML is deliberately kept initialized for the lifetime of the process.
+// Repeated nvmlInit_v2()/nvmlShutdown() cycles around CUDA workloads are
+// unsafe on some WSL/NVIDIA driver combinations and can corrupt the process
+// heap during teardown. The process will release NVML resources on exit.
+std::once_flag nvml_init_once;
+std::atomic<bool> nvml_process_available{false};
+
+void initialize_nvml_once() noexcept {
+    const auto result = nvmlInit_v2();
+    nvml_process_available.store(
+        result == NVML_SUCCESS, std::memory_order_release);
+}
 
 struct CpuTimes {
     std::uint64_t idle{0};
@@ -68,10 +82,11 @@ void ResourceMonitor::start() {
 
     stop_requested_.store(false);
 
-    // NVML is initialized once by the watcher. Failure is not hidden: GPU
-    // contention requested by the caller will later reject invalid telemetry.
-    nvmlReturn_t result = nvmlInit_v2();
-    if (result == NVML_SUCCESS) {
+    // Initialize NVML at most once per process and keep it alive until process
+    // exit. Failure is not hidden: GPU contention requested by the caller
+    // will later reject invalid telemetry.
+    std::call_once(nvml_init_once, initialize_nvml_once);
+    if (nvml_process_available.load(std::memory_order_acquire)) {
         nvmlDevice_t device{};
         if (nvmlDeviceGetHandleByIndex_v2(
                 static_cast<unsigned int>(cuda_device_id_), &device) == NVML_SUCCESS) {
@@ -93,10 +108,11 @@ void ResourceMonitor::stop() {
         thread_.join();
     }
 
-    if (gpu_monitor_valid_.load() || gpu_available_.load()) {
-        (void)nvmlShutdown();
-    }
+    // Do not call nvmlShutdown() here. NVML is process-lifetime state; keeping
+    // it alive avoids the CUDA/NVML teardown-order heap corruption observed
+    // after offline batch generation under WSL.
     gpu_monitor_valid_.store(false);
+    gpu_available_.store(false);
 }
 
 void ResourceMonitor::publish_bandwidth(Resource resource, double gbps) noexcept {

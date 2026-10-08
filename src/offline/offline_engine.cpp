@@ -1,6 +1,12 @@
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
+#include <utility>
 
+#include <flexon/contention/contention_generator.hpp>
 #include <flexon/offline/offline_engine.hpp>
 #include <flexon/offline/artifact/artifact_validator.hpp>
 #include <flexon/offline/artifact/artifact_writer.hpp>
@@ -131,7 +137,7 @@ void OfflineEngine::run(
         << "[offline] initial segments: "
         << initial.size() << '\n';
 
-    const auto levels =
+    auto levels =
         segmentation::MultiLevelSegmenter::build(
             resolved_model,
             graph,
@@ -149,6 +155,120 @@ void OfflineEngine::run(
         std::cout
             << "[offline] level " << i <<": " 
             << levels.levels[i].size() << " segments" << '\n';
+    }
+
+    // Profile every generated segment again while the standardized external
+    // contention workload is active. The normal mean_ms/percentile_ms fields
+    // remain the ideal profile. Each segment/resource pair receives its own
+    // maximum degradation ratio: contended_mean_ms / ideal_mean_ms. The
+    // runtime uses this precomputed ratio directly, avoiding an expensive
+    // division inside the online scheduling loop.
+    if (config.degradation_profiling_enabled) {
+        contention::Config contention_config;
+        contention_config.targets.cpu_percent = config.degradation_cpu_percent;
+        contention_config.targets.gpu_percent = config.degradation_gpu_percent;
+        contention_config.targets.dram_percent = config.degradation_dram_percent;
+        contention_config.targets.vram_percent = config.degradation_vram_percent;
+        contention_config.safety_factor = config.degradation_safety_factor;
+        contention_config.cuda_device_id = config.cuda_device_id;
+        contention_config.verbose = false;
+
+        std::cout
+            << "[degradation] starting standardized contention: "
+            << "cpu=" << config.degradation_cpu_percent << "% "
+            << "gpu=" << config.degradation_gpu_percent << "% "
+            << "dram=" << config.degradation_dram_percent << "% "
+            << "vram=" << config.degradation_vram_percent << "%\n";
+
+        contention::ContentionGenerator contention_generator(
+            std::move(contention_config));
+        contention_generator.start();
+
+        std::cout
+            << "[degradation] waiting "
+            << config.degradation_stabilization_seconds
+            << " s for contention to stabilize\n";
+        std::this_thread::sleep_for(
+            std::chrono::seconds(config.degradation_stabilization_seconds));
+
+        const auto state = contention_generator.state();
+        std::cout
+            << "[degradation] stabilized sample: "
+            << "cpu=" << state.cpu_utilization_percent << "% "
+            << "gpu=" << state.gpu_utilization_percent << "% "
+            << "dram=" << state.dram_bandwidth_gbps << " GB/s "
+            << "vram=" << state.vram_bandwidth_gbps << " GB/s\n";
+
+        for (std::size_t level = 0; level < levels.levels.size(); ++level) {
+            for (auto& ideal_profile : levels.levels[level]) {
+                const auto observed_profile = profiler.profile_under_contention(
+                    resolved_model, graph, ideal_profile.segment);
+
+                for (auto& ideal_cost : ideal_profile.costs) {
+                    if (ideal_cost.status !=
+                            core::ResourceSupportStatus::Supported ||
+                        !std::isfinite(ideal_cost.mean_ms) ||
+                        ideal_cost.mean_ms <= 0.0) {
+                        continue;
+                    }
+
+                    const auto observed = std::find_if(
+                        observed_profile.costs.begin(),
+                        observed_profile.costs.end(),
+                        [&](const auto& cost) {
+                            return cost.resource == ideal_cost.resource &&
+                                   cost.status ==
+                                       core::ResourceSupportStatus::Supported &&
+                                   std::isfinite(cost.mean_ms) &&
+                                   cost.mean_ms > 0.0;
+                        });
+
+                    if (observed == observed_profile.costs.end()) {
+                        throw std::runtime_error(
+                            "Missing contended degradation measurement for "
+                            "level " + std::to_string(level) +
+                            ", segment " +
+                            std::to_string(ideal_profile.segment.id) +
+                            ", resource " +
+                            (ideal_cost.resource == core::Resource::CPU
+                                 ? "cpu"
+                                 : "cuda"));
+                    }
+
+                    const double ratio =
+                        observed->mean_ms / ideal_cost.mean_ms;
+                    if (!std::isfinite(ratio) || ratio <= 0.0) {
+                        throw std::runtime_error(
+                            "Invalid degradation ratio for level " +
+                            std::to_string(level) + ", segment " +
+                            std::to_string(ideal_profile.segment.id));
+                    }
+
+                    ideal_cost.max_degradation_ratio =
+                        std::max(1.0, ratio);
+
+                    std::cout
+                        << "[degradation] level=" << level
+                        << " segment=" << ideal_profile.segment.id
+                        << " resource="
+                        << (ideal_cost.resource == core::Resource::CPU
+                                ? "cpu" : "cuda")
+                        << " ideal_ms=" << ideal_cost.mean_ms
+                        << " contended_ms=" << observed->mean_ms
+                        << " max_degradation_ratio="
+                        << ideal_cost.max_degradation_ratio << '\n';
+                }
+            }
+
+        }
+
+        // The generator owns RAII cleanup. It is destroyed before artifact
+        // writing continues, so all contention threads are joined before the
+        // generated artifacts are touched again.
+    } else {
+        std::cout
+            << "[degradation] contention profiling disabled; "
+            << "max_degradation_ratio remains 1.0\n";
     }
 
     artifact::ArtifactWriter::write(

@@ -38,20 +38,20 @@ relationship `d_r* = R_i^l / C_r*(s_i^l)`, for which
 `d_r* * C_r*(s_i^l) = R_i^l`.
 
 The alternative-resource score is continuously recomputed from its monitored
-remaining capacity:
+remaining capacity using the linear degradation envelope between the offline
+maximum ratio and the ideal point:
 
 ```text
-d_r = 1 / U_r
+U_r = clamp(U_r, 0.01, 1)
+
+d_r = max_dr + (max_dr - 1) * (0.01 - U_r) / (1 - 0.01)
 score = d_r * C_r(s_i^l)
 ```
 
-A small numerical epsilon is added to `U_r` only to avoid division by zero:
-
-```text
-1 / (U_r + epsilon)
-```
-
-This epsilon is an implementation safeguard, not a FlexOn paper parameter.
+Here `max_dr` is measured offline for the exact segment/resource pair. The
+resource monitor supplies the current remaining capacity `U_r` online. For
+the resource that just executed the segment, the measured runtime ratio
+remains authoritative.
 
 ## Execution behavior
 

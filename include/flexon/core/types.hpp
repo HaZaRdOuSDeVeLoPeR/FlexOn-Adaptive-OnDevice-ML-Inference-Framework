@@ -96,6 +96,10 @@ struct SegmentCost {
     double percentile_ms{0.0};
     ResourceSupportStatus status{ResourceSupportStatus::Supported};
     std::string reason;
+
+    // Maximum degradation ratio measured under the standardized contention
+    // workload for this exact segment/resource pair.
+    double max_degradation_ratio{1.0};
 };
 
 /**

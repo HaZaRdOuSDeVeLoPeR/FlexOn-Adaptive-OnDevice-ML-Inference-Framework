@@ -37,27 +37,35 @@ else:
     level unchanged
 ```
 
-The resource selector uses the paper's degradation factor:
+The resource selector uses a linear degradation envelope between the two
+anchor points `(U_min, max_dr)` and `(1, 1)`. For each exact
+segment/resource pair, `max_dr` is computed offline as:
 
 ```text
-d_r = R_i / C_r(s_i)    if r is the resource running the current segment
-
-d_r = 1 / U_r           otherwise
+max_dr(r, s_i) = contended_mean_ms(r, s_i) / mean_ms(r, s_i)
 ```
 
-and selects the supported resource minimizing:
+with `U_min = 0.01`. The live degradation for a resource that has not just
+executed the segment is:
 
 ```text
-d_r * C_r(next_segment)
+U = clamp(U_r, U_min, 1)
+
+d_r(U) = max_dr + (max_dr - 1) * (U_min - U) / (1 - U_min)
 ```
 
-where `U_r` is the monitored remaining capacity. For non-current resources,
-the implementation uses `1 / (U_r + epsilon)` with a small numerical epsilon
-only to guard the zero-capacity case. This epsilon is an implementation
-safeguard, not a paper parameter.
+Thus `d_r(1) = 1` and `d_r(U_min) = max_dr`. The maximum ratio is stored
+directly in the artifact, so the online scheduler does not need to divide a
+contended execution time by the ideal execution time. The remaining capacity
+is lower-clamped at `0.01`; using `min(0.01, U_r)` would incorrectly force
+all larger capacities to `0.01`.
 
-The first segment has no preceding segment measurement, so the implementation
-uses `1/U_r * C_r(first_segment)` as its initial resource-selection score.
+For the resource that just executed the current segment, the scheduler instead
+uses the measured runtime ratio `R_i / C_r(s_i)`, as in the paper. The
+supported resource minimizing `d_r * C_r(next_segment)` is selected.
+
+The first segment has no preceding execution measurement, so the normalized
+hyperbolic model is used for both resources.
 
 ## Runtime modes
 
